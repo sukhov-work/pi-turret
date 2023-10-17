@@ -1,0 +1,14 @@
+names:
+- crow
+- magpie
+- pigeon
+nc: 3
+roboflow:
+  license: CC BY 4.0
+  project: pigeons-h30dy
+  url: https://universe.roboflow.com/jayson-x-an0sg/pigeons-h30dy/dataset/2
+  version: 2
+  workspace: jayson-x-an0sg
+test: ../test/images
+train: Pigeons-2/train/images
+val: Pigeons-2/valid/images
