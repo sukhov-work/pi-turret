@@ -1,0 +1,64 @@
+Performing C SOURCE FILE Test CMAKE_HAVE_LIBC_PTHREAD failed with the following output:
+Change Dir: /home/jayson/Pan-Tilt_HAT_code/RaspberryPi/web_Python/mjpg-streamer/mjpg-streamer-experimental/_build/CMakeFiles/CMakeTmp
+
+Run Build Command(s):/usr/bin/gmake cmTC_ad2ee/fast && gmake[1]: Entering directory '/home/jayson/Pan-Tilt_HAT_code/RaspberryPi/web_Python/mjpg-streamer/mjpg-streamer-experimental/_build/CMakeFiles/CMakeTmp'
+/usr/bin/gmake  -f CMakeFiles/cmTC_ad2ee.dir/build.make CMakeFiles/cmTC_ad2ee.dir/build
+gmake[2]: Entering directory '/home/jayson/Pan-Tilt_HAT_code/RaspberryPi/web_Python/mjpg-streamer/mjpg-streamer-experimental/_build/CMakeFiles/CMakeTmp'
+Building C object CMakeFiles/cmTC_ad2ee.dir/src.c.o
+/usr/bin/cc   -DCMAKE_HAVE_LIBC_PTHREAD -o CMakeFiles/cmTC_ad2ee.dir/src.c.o -c /home/jayson/Pan-Tilt_HAT_code/RaspberryPi/web_Python/mjpg-streamer/mjpg-streamer-experimental/_build/CMakeFiles/CMakeTmp/src.c
+Linking C executable cmTC_ad2ee
+/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_ad2ee.dir/link.txt --verbose=1
+/usr/bin/cc  -DCMAKE_HAVE_LIBC_PTHREAD -rdynamic CMakeFiles/cmTC_ad2ee.dir/src.c.o -o cmTC_ad2ee 
+/usr/bin/ld: CMakeFiles/cmTC_ad2ee.dir/src.c.o: in function `main':
+src.c:(.text+0x34): undefined reference to `pthread_create'
+/usr/bin/ld: src.c:(.text+0x3c): undefined reference to `pthread_detach'
+/usr/bin/ld: src.c:(.text+0x44): undefined reference to `pthread_cancel'
+/usr/bin/ld: src.c:(.text+0x50): undefined reference to `pthread_join'
+collect2: error: ld returned 1 exit status
+gmake[2]: *** [CMakeFiles/cmTC_ad2ee.dir/build.make:106: cmTC_ad2ee] Error 1
+gmake[2]: Leaving directory '/home/jayson/Pan-Tilt_HAT_code/RaspberryPi/web_Python/mjpg-streamer/mjpg-streamer-experimental/_build/CMakeFiles/CMakeTmp'
+gmake[1]: *** [Makefile:140: cmTC_ad2ee/fast] Error 2
+gmake[1]: Leaving directory '/home/jayson/Pan-Tilt_HAT_code/RaspberryPi/web_Python/mjpg-streamer/mjpg-streamer-experimental/_build/CMakeFiles/CMakeTmp'
+
+
+Source file was:
+#include <pthread.h>
+
+void* test_func(void* data)
+{
+  return data;
+}
+
+int main(void)
+{
+  pthread_t thread;
+  pthread_create(&thread, NULL, test_func, NULL);
+  pthread_detach(thread);
+  pthread_cancel(thread);
+  pthread_join(thread, NULL);
+  pthread_atfork(NULL, NULL, NULL);
+  pthread_exit(NULL);
+
+  return 0;
+}
+
+Determining if the function pthread_create exists in the pthreads failed with the following output:
+Change Dir: /home/jayson/Pan-Tilt_HAT_code/RaspberryPi/web_Python/mjpg-streamer/mjpg-streamer-experimental/_build/CMakeFiles/CMakeTmp
+
+Run Build Command(s):/usr/bin/gmake cmTC_af2a6/fast && gmake[1]: Entering directory '/home/jayson/Pan-Tilt_HAT_code/RaspberryPi/web_Python/mjpg-streamer/mjpg-streamer-experimental/_build/CMakeFiles/CMakeTmp'
+/usr/bin/gmake  -f CMakeFiles/cmTC_af2a6.dir/build.make CMakeFiles/cmTC_af2a6.dir/build
+gmake[2]: Entering directory '/home/jayson/Pan-Tilt_HAT_code/RaspberryPi/web_Python/mjpg-streamer/mjpg-streamer-experimental/_build/CMakeFiles/CMakeTmp'
+Building C object CMakeFiles/cmTC_af2a6.dir/CheckFunctionExists.c.o
+/usr/bin/cc   -DCHECK_FUNCTION_EXISTS=pthread_create -o CMakeFiles/cmTC_af2a6.dir/CheckFunctionExists.c.o -c /usr/share/cmake-3.18/Modules/CheckFunctionExists.c
+Linking C executable cmTC_af2a6
+/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_af2a6.dir/link.txt --verbose=1
+/usr/bin/cc  -DCHECK_FUNCTION_EXISTS=pthread_create -rdynamic CMakeFiles/cmTC_af2a6.dir/CheckFunctionExists.c.o -o cmTC_af2a6  -lpthreads 
+/usr/bin/ld: cannot find -lpthreads
+collect2: error: ld returned 1 exit status
+gmake[2]: *** [CMakeFiles/cmTC_af2a6.dir/build.make:106: cmTC_af2a6] Error 1
+gmake[2]: Leaving directory '/home/jayson/Pan-Tilt_HAT_code/RaspberryPi/web_Python/mjpg-streamer/mjpg-streamer-experimental/_build/CMakeFiles/CMakeTmp'
+gmake[1]: *** [Makefile:140: cmTC_af2a6/fast] Error 2
+gmake[1]: Leaving directory '/home/jayson/Pan-Tilt_HAT_code/RaspberryPi/web_Python/mjpg-streamer/mjpg-streamer-experimental/_build/CMakeFiles/CMakeTmp'
+
+
+

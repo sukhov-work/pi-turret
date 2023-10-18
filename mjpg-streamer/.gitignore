@@ -4,19 +4,19 @@
 *.o
 
 # Compiled Dynamic libraries
-*.so
+#*.so
 
 # Compiled Static libraries
-*.lai
-*.la
-*.a
+#*.lai
+#*.la
+#*.a
 
 # Python
 __pycache__
 *.pyc
 
 /mjpg-streamer-experimental/mjpg_streamer
-/mjpg-streamer-experimental/_build
+#/mjpg-streamer-experimental/_build
 *.deb
 _pkg/
 doc/
