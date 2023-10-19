@@ -140,11 +140,11 @@ class TurretHandler:
         if (channel == 0 and target_angle < (self.base_y_angle + 5) and target_angle > (self.base_y_angle)): 
             prev_angle = self.angle_y
             self.angle_y = target_angle
-        elif (channel == 1 and target_angle < (self.base_x_angle + 12) and target_angle > (self.base_x_angle - 15)):
+        elif (channel == 1 and target_angle < (self.base_x_angle + 13) and target_angle > (self.base_x_angle - 20)):
             prev_angle = self.angle_x
             self.angle_x = target_angle
         else:
-            print("not supported params", channel, pulse)
+            print("not supported params", channel, pulse, target_angle)
             return
             
         self.pwm.start_PCA9685()
@@ -212,14 +212,20 @@ class TurretHandler:
         # offsets from image center adjusted for current resolution
         # '15' divider, can be tuned for precision to scale movement
         # same for y axis, must be negative for correct orientation
-        # ((x0 + x1)/2 + half_width) / 15
-        rotation_coefficient = 15
+        # ((x0 + x1)/2 + half_width) / 20
+        rotation_coefficient = 30
         
-        calculated_angle_x = - int((int((box[0] + box[2])/2) - self.camera_width / 2 )/ rotation_coefficient) + self.base_x_angle - 1
-        calculated_angle_y = - int((int((box[1] + box[3])/2) - self.camera_height / 2 )/ rotation_coefficient) + self.base_y_angle -5
+        calculated_angle_x = - int((int((box[0] + box[2])/2) - self.camera_width / 2 )/ rotation_coefficient) + self.base_x_angle # + 2
+        
+        # For physical turret the Y-axis offset begins from the bottom of the frame instead of the center due to case and servo limitations 
+        # We get only 4 effective degrees range gf freedom in Y-axis
+        calculated_angle_y = int((self.camera_height - int((box[1] + box[3])/2)) / ( self.camera_height / 4)) + self.base_y_angle # + 1
+        
+        #center-based Y axis calc
+        #calculated_angle_y = - int((int((box[1] + box[3])/2) - self.camera_height / 2 )/ rotation_coefficient) + self.base_y_angle -5
         
         print("calculated rotation angles", calculated_angle_x, calculated_angle_y)
-        if (calculated_angle_x > (self.base_x_angle + 12) or calculated_angle_x < (self.base_x_angle - 15) or
+        if (calculated_angle_x > (self.base_x_angle + 13) or calculated_angle_x < (self.base_x_angle - 20) or
          calculated_angle_y > (self.base_y_angle + 5) or calculated_angle_y < (self.base_y_angle)):
              print("calculated angle out of bounds [28 - 56, 138 - 142], skipping", calculated_angle_x, calculated_angle_y)
              return
@@ -261,7 +267,7 @@ class TurretHandler:
 
         # can fire only if currect detections count > confidende threshold
         detection_confidende_counter = 0
-        detection_confidende_threshold = 3
+        detection_confidende_threshold = 2
         
         # reset detection counter after # of iterations to avoid too many false positives
         detection_reset_counter = 0
@@ -269,7 +275,7 @@ class TurretHandler:
         
         # person detection safeguard stuff
         person_class_name = 'person'
-        person_class_detection_threshold = 0.9 # should not be higher than 0.3 (30% confidence)  for safety!
+        person_class_detection_threshold = 0.3 # should not be higher than 0.3 (30% confidence)  for safety!
         
         try: 
             #Below is the never ending loop that determines what will happen when an object is identified.    
@@ -302,7 +308,7 @@ class TurretHandler:
                 target_box = self.getTargetPigeonCandidateBox(0.7, detetion_results)
                 
                 if len(target_box) != 0:         
-                    if (target_box[0] < 10 or target_box[2] > (self.camera_width - 10) or
+                    if (target_box[0] < -1 or target_box[2] > (self.camera_width + 10) or
                         target_box[1] < 10 or target_box[3] > (self.camera_height - 10)):
                         print("target out of bounds, skipping", target_box)
                         

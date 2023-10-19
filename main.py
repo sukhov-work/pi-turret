@@ -20,9 +20,9 @@ signal.signal(signal.SIGINT, turret_handler.gracefulExit)
 #Set the Horizontal vertical servo parameters
 last_servo_pulses = turret_handler.getLastServoPulses()
 print("last servo pulse values [H, V]", last_servo_pulses)
-HPulse = last_servo_pulses[0]  # Default is ~925  Sets the initial Pulse
+HPulse = last_servo_pulses[0]   
 HStep = 0                      # Sets the initial step length
-VPulse = last_servo_pulses[1]  # Default is ~2365 Sets the initial Pulse
+VPulse = last_servo_pulses[1]   
 VStep = 0                      # Sets the initial step length
 
 start = int(time.time())
