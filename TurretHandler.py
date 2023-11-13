@@ -45,8 +45,14 @@ class TurretHandler:
         self.pwm = PCA9685(debug=True)
         self.pwm.setPWMFreq(50)
 
-        self.base_x_angle = 44  # Pulse eq 990
-        self.base_y_angle = 138 # Pulse eq 2040
+        # bounds x: 5 - 47 deg
+        # bounds y: 5 - 25 deg
+        self.limit_x = 47
+        self.start_x = 5
+        self.limit_y = 25
+        self.start_y = 5
+        self.base_x_angle = 31  # Pulse eq 850
+        self.base_y_angle = 23 # Pulse eq 760
         
         last_servo_state = self.loadLastServoState()
         if (len(last_servo_state) == 0):
@@ -136,11 +142,12 @@ class TurretHandler:
         target_angle = int((pulse - 501) / (2000 / 180))
         
         prev_angle = target_angle
-        # very limited Y range
-        if (channel == 0 and target_angle < (self.base_y_angle + 5) and target_angle > (self.base_y_angle)): 
+        # Y (V) axis, very limited range
+        if (channel == 0 and target_angle < self.limit_y and target_angle >= self.start_y): 
             prev_angle = self.angle_y
             self.angle_y = target_angle
-        elif (channel == 1 and target_angle < (self.base_x_angle + 13) and target_angle > (self.base_x_angle - 20)):
+        # X (H) axis  
+        elif (channel == 1 and target_angle < self.limit_x and target_angle >= self.start_x):
             prev_angle = self.angle_x
             self.angle_x = target_angle
         else:
@@ -212,22 +219,23 @@ class TurretHandler:
         # offsets from image center adjusted for current resolution
         # '15' divider, can be tuned for precision to scale movement
         # same for y axis, must be negative for correct orientation
-        # ((x0 + x1)/2 + half_width) / 20
-        rotation_coefficient = 30
+        # ((x0 + x1)/2 + half_width) / coefficient
+        rotation_coefficient_x = 20  # 30
+        rotation_coefficient_y = 30
         
-        calculated_angle_x = - int((int((box[0] + box[2])/2) - self.camera_width / 2 )/ rotation_coefficient) + self.base_x_angle # + 2
+        calculated_angle_x = - int((int((box[0] + box[2])/2) - self.camera_width / 2 )/ rotation_coefficient_x) + self.base_x_angle # + 2
         
-        # For physical turret the Y-axis offset begins from the bottom of the frame instead of the center due to case and servo limitations 
+        # Simplified Y coord inate translation where the Y-axis offset begins from the bottom of the frame instead of the center due to case and servo limitations 
         # We get only 4 effective degrees range gf freedom in Y-axis
-        calculated_angle_y = int((self.camera_height - int((box[1] + box[3])/2)) / ( self.camera_height / 4)) + self.base_y_angle # + 1
+        # calculated_angle_y = int((self.camera_height - int((box[1] + box[3])/2)) / ( self.camera_height / 4)) + self.base_y_angle + 1
         
         #center-based Y axis calc
-        #calculated_angle_y = - int((int((box[1] + box[3])/2) - self.camera_height / 2 )/ rotation_coefficient) + self.base_y_angle -5
+        calculated_angle_y = int((int((box[1] + box[3])/2) - self.camera_height / 2 )/ rotation_coefficient_y) + self.base_y_angle - 5
         
         print("calculated rotation angles", calculated_angle_x, calculated_angle_y)
-        if (calculated_angle_x > (self.base_x_angle + 13) or calculated_angle_x < (self.base_x_angle - 20) or
-         calculated_angle_y > (self.base_y_angle + 5) or calculated_angle_y < (self.base_y_angle)):
-             print("calculated angle out of bounds [28 - 56, 138 - 142], skipping", calculated_angle_x, calculated_angle_y)
+        if (calculated_angle_x > self.limit_x or calculated_angle_x < self.start_x or
+         calculated_angle_y > self.limit_y or calculated_angle_y < self.start_y):
+             print("calculated angle out of bounds [5 - 47, 5 - 25], skipping", calculated_angle_x, calculated_angle_y)
              return
        
         self.rotateGradually(calculated_angle_x, calculated_angle_y, prev_angle_x, prev_angle_y)
@@ -276,7 +284,7 @@ class TurretHandler:
         # person detection safeguard stuff
         person_class_name = 'person'
         person_class_detection_threshold = 0.3 # should not be higher than 0.3 (30% confidence)  for safety!
-        
+       
         try: 
             #Below is the never ending loop that determines what will happen when an object is identified.    
             while True:
@@ -302,14 +310,14 @@ class TurretHandler:
                 detetion_results = self.getObjects(frame, targets=['pigeon', 'crow', 'magpie'])
                 
                 #output image for targeting / debugging purposes
-                #combined_img = self.yolov8_detector.draw_detections(frame, self.class_names, self.colors)
-                #cv2.imshow("Detected Objects", combined_img)
+                combined_img = self.yolov8_detector.draw_detections(frame, self.class_names, self.colors)
+                cv2.imshow("Detected Objects", combined_img)
             
                 target_box = self.getTargetPigeonCandidateBox(0.7, detetion_results)
                 
                 if len(target_box) != 0:         
                     if (target_box[0] < -1 or target_box[2] > (self.camera_width + 10) or
-                        target_box[1] < 10 or target_box[3] > (self.camera_height - 10)):
+                        target_box[1] < 0 or target_box[3] > (self.camera_height - 10)):
                         print("target out of bounds, skipping", target_box)
                         
                     else:

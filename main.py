@@ -83,10 +83,10 @@ def controlCmd():
         VStep = 0
         print("stop")
     elif code == "up":
-        VStep = -15
+        VStep = 15
         print("up")
     elif code == "down":
-        VStep = 15
+        VStep = -15
         print("down")
     elif code == "left":
         HStep = 15
@@ -128,10 +128,11 @@ def turretControlfunc():
         if(HStep != 0):
             VStep = 0
             HPulse += HStep
-            if(HPulse > 1100):  # 57 deg - LEFT
-                HPulse = 1100
-            if(HPulse < 725):   # 17 deg - RIGHT
-                HPulse = 725
+          
+            if(HPulse > 1040):  # 47 deg left
+                HPulse = 1040
+            if(HPulse < 560):   # 5 deg right
+                HPulse = 560
                 
             #set channel 1, the Horizontal servo
             print("H", HPulse)
@@ -142,10 +143,11 @@ def turretControlfunc():
         if(VStep != 0):
             HStep = 0
             VPulse -= VStep
-            if(VPulse > 2085):  # 142 deg UP
-                VPulse = 2085
-            if(VPulse < 2020):  # 138 deg DOWN
-                VPulse = 2020
+           
+            if(VPulse > 780):  # 25 deg down
+                VPulse = 780
+            if(VPulse < 560): 
+                VPulse = 560   # 5 deg UP
                 
             #set channel 0, the vertical servo
             print("V", VPulse)
