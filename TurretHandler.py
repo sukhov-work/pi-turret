@@ -50,7 +50,7 @@ class TurretHandler:
         self.limit_x = 47
         self.start_x = 5
         self.limit_y = 25
-        self.start_y = 5
+        self.start_y = 0
         self.base_x_angle = 31  # Pulse eq 850
         self.base_y_angle = 23 # Pulse eq 760
         
@@ -220,17 +220,21 @@ class TurretHandler:
         # '15' divider, can be tuned for precision to scale movement
         # same for y axis, must be negative for correct orientation
         # ((x0 + x1)/2 + half_width) / coefficient
-        rotation_coefficient_x = 20  # 30
-        rotation_coefficient_y = 30
+        rotation_coefficient_x = 25  # 30
+        rotation_coefficient_y = 15
         
-        calculated_angle_x = - int((int((box[0] + box[2])/2) - self.camera_width / 2 )/ rotation_coefficient_x) + self.base_x_angle # + 2
+        calculated_angle_x = - int((int((box[0] + box[2])/2) - self.camera_width / 2 )/ rotation_coefficient_x) + self.base_x_angle + 5
         
         # Simplified Y coord inate translation where the Y-axis offset begins from the bottom of the frame instead of the center due to case and servo limitations 
         # We get only 4 effective degrees range gf freedom in Y-axis
         # calculated_angle_y = int((self.camera_height - int((box[1] + box[3])/2)) / ( self.camera_height / 4)) + self.base_y_angle + 1
         
         #center-based Y axis calc
-        calculated_angle_y = int((int((box[1] + box[3])/2) - self.camera_height / 2 )/ rotation_coefficient_y) + self.base_y_angle - 5
+        calculated_angle_y = int((int((box[1] + box[3])/2) - self.camera_height / 2 )/ rotation_coefficient_y) + self.base_y_angle + 5
+        
+        #optimise for lower frame precise movement 
+        if (calculated_angle_y > 25):
+            calculated_angle_y = 20 + (calculated_angle_y - self.limit_y) // 3
         
         print("calculated rotation angles", calculated_angle_x, calculated_angle_y)
         if (calculated_angle_x > self.limit_x or calculated_angle_x < self.start_x or
@@ -283,7 +287,10 @@ class TurretHandler:
         
         # person detection safeguard stuff
         person_class_name = 'person'
-        person_class_detection_threshold = 0.3 # should not be higher than 0.3 (30% confidence)  for safety!
+        person_class_detection_threshold = 0.9 # should not be higher than 0.3 (30% confidence)  for safety!
+      
+        # TODOODODODO remove me!!!!!! 
+        #self.main_laser_led.on()
        
         try: 
             #Below is the never ending loop that determines what will happen when an object is identified.    
@@ -353,8 +360,8 @@ class TurretHandler:
         finally:
             self.gracefulExit()
 
-"""
+
 h = TurretHandler()
 h.setTurretState(is_enabled = True)
 h.startDetectionCycle()
-"""
+
