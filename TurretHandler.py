@@ -232,9 +232,9 @@ class TurretHandler:
         #center-based Y axis calc
         calculated_angle_y = int((int((box[1] + box[3])/2) - self.camera_height / 2 )/ rotation_coefficient_y) + self.base_y_angle + 5
         
-        #optimise for lower frame precise movement 
-        if (calculated_angle_y > 25):
-            calculated_angle_y = 20 + (calculated_angle_y - self.limit_y) // 3
+        #optimise for lower frame part precise movement 
+        if (calculated_angle_y > 18):
+            calculated_angle_y = 18 + (calculated_angle_y - self.limit_y) // 3
         
         print("calculated rotation angles", calculated_angle_x, calculated_angle_y)
         if (calculated_angle_x > self.limit_x or calculated_angle_x < self.start_x or
@@ -317,8 +317,8 @@ class TurretHandler:
                 detetion_results = self.getObjects(frame, targets=['pigeon', 'crow', 'magpie'])
                 
                 #output image for targeting / debugging purposes
-                combined_img = self.yolov8_detector.draw_detections(frame, self.class_names, self.colors)
-                cv2.imshow("Detected Objects", combined_img)
+               # combined_img = self.yolov8_detector.draw_detections(frame, self.class_names, self.colors)
+               # cv2.imshow("Detected Objects", combined_img)
             
                 target_box = self.getTargetPigeonCandidateBox(0.7, detetion_results)
                 
