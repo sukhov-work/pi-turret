@@ -1,0 +1,443 @@
+sudo raspi-config
+libcamera-hello
+libcamera
+libcamera-hellp
+libcamera-hello
+sudo raspi-config
+sudo apt-get update && sudo apt-get upgrade
+sudo nano /etc/dphys-swapfile
+reboot
+sudo raspi-config
+sudo nano /etc/dphys-swapfile
+sudo apt-get install build-essential cmake pkg-config
+sudo apt-get install libjpeg-dev libtiff5-dev libjasper-dev libpng12-dev
+sudo apt-get install libjpeg-dev libtiff5-dev libjasper-dev libpng12
+sudo add-apt-repository "deb http://security.ubuntu.com/ubuntu xenial-security main"
+sudo apt update
+sudo apt-get install libavcodec-dev libavformat-dev libswscale-dev libv4l-dev
+sudo apt-get install libxvidcore-dev libx264-dev
+sudo apt-get install libgtk2.0-dev libgtk-3-dev
+sudo apt-get install libatlas-base-dev gfortran
+sudo pip3 install numpy
+wget -O opencv.zip https://github.com/opencv/opencv/archive/4.4.0.zip
+wget -O opencv_contrib.zip https://github.com/opencv/opencv_contrib/archive/4.4.0.zip
+unzip opencv.zip
+unzip opencv_contrib.zip
+cd ~/opencv-4.4.0/
+mkdir build
+cd build
+cmake -D CMAKE_BUILD_TYPE=RELEASE \
+make -j $(nproc)
+sudo make install && sudo ldconfig
+sudo reboot
+sudo nano /etc/dphys-swapfile
+scp
+scp -h
+exit
+ls
+ls -ltrh /dev/video*
+libcamera-hello
+sudo raspi-config
+v4l2-ctl --overlay=1
+sudo modprobe bcm2835-v4l2
+v4l2-ctl --overlay=1
+v4l2-ctl --overlay=0
+raspistill
+sudo apt-get install raspistill
+sudo apt-get install vim
+vim  /etc/ld.so.conf.d/00-vmcs.conf
+sudo vim  /etc/ld.so.conf.d/00-vmcs.conf
+sudo apt install -y python3-pyqt5 python3-opengl
+sudo apt install -y python3-picamera2
+pip install picamera2[array]
+ARCH="arm64" GCLOUD_HOSTED_METRICS_URL="https://prometheus-prod-13-prod-us-east-0.grafana.net/api/prom/push" GCLOUD_HOSTED_METRICS_ID="1179042" GCLOUD_SCRAPE_INTERVAL="60s" GCLOUD_HOSTED_LOGS_URL="https://logs-prod-006.grafana.net/loki/api/v1/push" GCLOUD_HOSTED_LOGS_ID="688596" GCLOUD_RW_API_KEY="" /bin/sh -c "$(curl -fsSL https://storage.googleapis.com/cloud-onboarding/agent/scripts/grafanacloud-install.sh)"
+sudo systemctl enable grafana-agent.service
+vim /etc/grafana-agent.yaml
+sudo systemctl restart grafana-agent.service
+df -h
+sudo raspi-config
+61b49702-7af5-4cb1-bb01-4d43fc3e3f4c
+wget http://www.airspayce.com/mikem/bcm2835/bcm2835-1.71.tar.gz
+tar zxvf bcm2835-1.71.tar.gz
+cd bcm2835-1.71/
+sudo ./configure && sudo make && sudo make check && sudo make install
+cd
+sudo apt-get install wiringpi
+wget https://project-downloads.drogon.net/wiringpi-latest.deb
+sudo dpkg -i wiringpi-latest.deb
+gpio -v
+git clone https://github.com/WiringPi/WiringPi
+cd WiringPi
+. /build
+ls
+. build
+gpio -v
+sudo apt-get install wiringpi
+cd
+sudo apt --fix-broken install
+gpio -v
+sudo apt-get install p7zip-full
+wget https://files.waveshare.com/upload/9/96/Pan-Tilt_HAT_code.7z
+7z x Pan-Tilt_HAT_code.7z -r -o./Pan-Tilt_HAT_code
+ls
+sudo chmod 777 -R  Pan-Tilt_HAT_code
+cd Pan-Tilt_HAT_code/RaspberryPi/
+ls
+cd Servo_Driver/
+ls
+cd python/
+ls
+vim main.py
+python main.py
+python3 main.py
+sudo raspi-config
+sudo reboot
+gpio
+gpio readall
+gpio -h
+ls
+cd Pan-Tilt_HAT_code/
+cd RaspberryPi/test/
+make clean
+make
+sudo ./main
+cd
+sudo apt-get install python-bottle
+curl -O https://bootstrap.pypa.io/ez_setup.py
+sudo python ez_setup.py
+sudo easy_install bottle
+python3 -m pip install bottle
+
+cd Pan-Tilt_HAT_code/RaspberryPi/web_Python/
+python main.py
+libcamera-hello
+cd Pan-Tilt_HAT_code/RaspberryPi/test/
+. ./main
+ls
+./main
+ls
+cd Servo/
+ls
+cat main.c
+cd ..
+./main
+cd ..
+python ./Servo_Driver/python/custom_test1.py
+python ./Servo_Driver/python/side_rotation_1.py
+cd web_Python/
+sudo python main.py
+cd ..
+cd Servo_Driver/
+ls
+cd python/
+ls
+python3 side_rotation_1.py
+cd ..
+cd ,,
+cd ..
+cd web_Python/
+sudo python3 main.py
+python3 -m pip3 install bottle
+python3 -m pip install bottle
+sudo python3 main.py
+sudo apt-get install pip3
+sudo apt install python3-pip
+pip -v
+pip list
+sudo python3 main.py
+git clone https://github.com/jacksonliam/mjpg-streamer
+ls
+cd mjpg-streamer/mjpg-streamer-experimental/
+sudo make clean all
+ls
+make clean
+sudo make install
+cd ../..
+rm -rf mjpg-streamer
+ls
+git clone https://github.com/jacksonliam/mjpg-streamer
+cd mjpg-streamer/mjpg-streamer-experimental/
+sudo make clean all
+sudo apt-get install cmake libjpeg8-dev
+sudo apt-get install cmake libjpeg62-turbo-dev
+sudo make clean all
+cd ../..
+sudo python3 main.py
+sudo python main.py
+python main.py
+cd mjpg-streamer/mjpg-streamer-experimental/plugins/
+ls
+cd input_raspicam/
+ls
+cd ../..
+ls
+sudo make clean all
+ls
+vim Makefile
+vim cmake/
+vim CMakeLists.txt
+cd www
+ls
+cd ..
+cd _build/
+ls
+cd plugins/
+ls
+cd input_raspicam/
+ls
+sudo make clean all
+sudo cmake clean all
+sudo cmake install
+vim Makefile
+ls
+ls CMakeFiles/
+cd ..
+ls
+cd plugins/input_uvc/
+ls
+cat CMakeLists.txt
+cd ..
+cd input_raspicam/
+ls
+cat CMakeLists.txt
+ls /opt/vc
+sudo ls /opt/vc
+sudo ls /opt
+cd /opt
+gitf clone https://github.com/raspberrypi/firmware.git
+
+git clone https://github.com/raspberrypi/firmware.git
+ls
+cd firm
+cd firmware/
+ls
+cd opt
+ls
+ls /opt/vc
+cp vc /opt
+ls
+cp -r  vc /opt
+sudo cp -r  vc /opt
+ls
+ls /opt/vc/
+du -sh .
+cd ..
+du -sh .
+ls
+du -sh opt
+rm -rf boot documentation extra hardfp
+ls
+du -sh .
+ls
+cd ..
+rm -rf firmware
+df -h
+cd Pan-Tilt_HAT_code/RaspberryPi/web_Python/mjpg-streamer/mjpg-streamer-experimental/
+sudo cmake clean all
+sudo make clean all
+cd
+libcamera
+libcamera-hello
+sudo raspi-config
+cd /opt/vc/
+ls
+cd ..
+mv vc tmp-vc
+sudo mv vc tmp-vc
+ls
+cd ~
+cd Pan-Tilt_HAT_code/RaspberryPi/web_Python/mjpg-streamer/mjpg-streamer-experimental
+sudo make clean all
+cd plugins/input_raspicam/
+ls
+cat CMakeLists.txt
+cd ../..
+sudo make clean
+sudo make clean all
+cd plugins/input_raspicam/
+ls
+cd ../..
+vim CMakeLists.txt
+sudo make clean all
+libcamera-still --list-cameras
+lsusb
+v4l2-ctl --list-formats-ext
+ls
+cd plugins/input_opencv/
+cat CMakeLists.txt
+vim CMakeLists.txt
+cd ../..
+sudo make clean all
+cd plugins/input_opencv/
+vim CMakeLists.txt
+cat CMakeLists.txt
+vim CMakeLists.txt
+cd ../..
+sudo make clean all
+cd plugins/input_opencv/
+vim CMakeLists.txt
+cd ..
+cd input_uvc/
+vim CMakeLists.txt
+cd ..
+cd input_opencv/
+vim CMakeLists.txt
+cd ../..
+cd plugins/input_opencv/
+cd ../..
+sudo make clean all
+cd plugins/input_opencv/
+vim input_opencv.cpp
+cd ../..
+sudo make clean all
+cd plugins/input_opencv/
+vim input_opencv.cpp
+cd ../..
+sudo make clean all
+ls
+cd plugins/input_opencv/
+cat CMakeLists.txt
+cd ../..
+sudo apt install v4l-utils
+ls /dev/v4l/by-id/
+ls /dev/v4l/by-path/
+ls -la /dev/video*
+ls /dev/v4l/by-id/
+v4l2-ctl --list-devices
+cd Pan-Tilt_HAT_code/RaspberryPi/test/
+./main
+ps -ax
+kill 1556
+ps -ax
+kill -9 1556
+ps -ax | grep mjpg
+kill -9 1558
+ps -ax | grep mjpg
+ps -ax
+./main
+cd Pan-Tilt_HAT_code/RaspberryPi/test/
+./main
+ps -ax
+ps -ax | grep python
+kill 1705
+ps -ax | grep python
+./main
+cd opencv_test_detection/
+mkdir yolo
+cd yolo/
+wget https://pjreddie.com/media/files/yolov3.weights
+wget https://pjreddie.com/media/files/yolov31.cfg
+wget https://pjreddie.com/media/files/coco.names
+wget https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names
+wget https://raw.githubusercontent.com/pjreddie/darknet/master/cfg/yolov3.cfg
+pip -v
+pip3 -v
+pip3 install  ultralytics
+cd opencv_test_detection/
+wget https://www.allaboutbirds.org/guide/assets/photo/308065631-1280px.jpg
+pip install onnxruntime
+ps -ax | grep python
+ps -ax | grep c
+ps -ax | grep cv
+kill 2306
+kill 2308
+ps -ax | grep cv
+cd opencv_test_detection/YoloRunner/
+python TurretHandler.py
+htop
+libc
+libcamera
+ps -ax |grep python
+sudo apt-get install wicd-curses
+sudo vim /etc/wpa_supplicant/wpa_supplicant.conf
+ifconfig
+sudo vim /etc/wpa_supplicant/wpa_supplicant.conf
+ls
+cd opencv_test_detection/
+cd YoloRunner/
+python3
+python3 main.py
+git
+ssh-keygen -t rsa -C "jaysonx1009@gmail.com"
+cat .ssh/id_rsa.pub
+cd opencv_test_detection/YoloRunner/
+ls
+touch .gitignore
+vim .gitignore
+git init
+git config --global init.defaultBranch main
+git status
+git checkout main
+git checkout -b main
+git add .
+git status
+cd mjpg-streamer/
+ls
+cd mjpg-streamer-experimental/
+ls
+cd ..
+cd..
+cd cc
+cd ..
+git add .
+git status
+git remove servo-test.py
+git rm servo-test.py
+git rm -f servo-test.py
+git add .
+git commit -m "Init"
+git config --global user.email "jaysonx1009@gmail.com"
+git config --global user.name "Jayson"
+git commit -m "Init"
+git remote add origin git@github.com:sukhov-work/pi-turret.git
+git push -f
+git push --set-upstream origin main
+ping 8.8.8.8
+git push -f
+git remote  --set-upstream origin main
+ping 8.8.8.8
+ifconfig
+cat /etc/resolv.conf
+sudo vim /etc/resolv.conf
+ping 8.8.8.8
+sudo vim /etc/resolv.conf
+sudo vim /etc/resolvconf.conf
+sudo vim /etc/resolv.conf
+ping 8.8.8.8
+ifconfig
+cat /etc/dhcpcd.conf
+traceroute 8.8.8.8
+tracert 8.8.8.8
+sudo apt-get install traceroute
+sudo apt-get install traceroute
+traceroute -l 8.8.8.8
+traceroute  8.8.8.8
+cat /etc/resolv.conf
+netstat -r
+reboot
+sudo reboot
+ifconfig
+netstat -nr
+hostname -i
+sudo vim /etc/dhcpcd.conf
+sudo reboot
+ifconfig
+ping 8.8.8.8
+cat /etc/resolv.conf
+cat /etc/resolvconf.conf
+cd opencv_test_detection/
+cd YoloRunner/
+vim /boot/config.txt
+sudo vim /boot/config.txt
+sudo reboot
+cd opencv_test_detection/YoloRunner/
+python3 TurretHandler.py
+sudo vim /boot/config.txt
+raspi-gpio get
+sudo i2cdetect -y -r 1
+sudo i2cdetect -y -r 1
+sudo i2cdetect -y -r 0
+sudo raspi-config nonint get_i2c
+sudo gpio readall
+ismod |grep i2
+lsmod |grep i2c
