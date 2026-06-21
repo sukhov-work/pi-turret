@@ -20,6 +20,9 @@ from YOLOv8 import YOLOv8
 from YOLOv8 import DetectionResult
 import traceback
 
+from signal import signal, SIGTERM, SIGHUP, pause
+from rpi_lcd import LCD
+
 
 
 """
@@ -33,6 +36,8 @@ class TurretHandler:
     def __init__(self):
         self.is_turret_enabled = False
         self.servo_state_file = 'last_servo_state.txt'
+        
+        self.lcd = LCD()
         
         self.aux_laser_led = LED(27)
         self.main_laser_led = LED(26)
@@ -122,6 +127,7 @@ class TurretHandler:
         time.sleep(0.5)
         
     def triggerMainLaser(self, active_time = 2.0):
+        self.lcd.text("Triggered main", 1)
         self.main_laser_led.on()
         time.sleep(active_time)
         self.main_laser_led.off()
@@ -176,6 +182,7 @@ class TurretHandler:
         self.main_laser_led.off()
         time.sleep(0.5)
         cv2.destroyAllWindows()
+        self.lcd.clear()
         print ("\nProgram end atexit/signal handler")
         syslog.syslog(syslog.LOG_INFO, "Program end atexit/signal handler")
 
@@ -241,7 +248,8 @@ class TurretHandler:
          calculated_angle_y > self.limit_y or calculated_angle_y < self.start_y):
              print("calculated angle out of bounds [5 - 47, 5 - 25], skipping", calculated_angle_x, calculated_angle_y)
              return
-       
+        
+        self.lcd.text("M: {0}, {1}".format(calculated_angle_x, calculated_angle_y) , 2)
         self.rotateGradually(calculated_angle_x, calculated_angle_y, prev_angle_x, prev_angle_y)
         self.triggerAuxLaser()
         self.triggerMainLaser()
@@ -298,10 +306,19 @@ class TurretHandler:
                 if (not self.is_turret_enabled):
                     detection_confidende_counter = 0
                     self.status_led.off()
+                    self.lcd.text("Detection off,", 1)
                     time.sleep(5)
                     continue
                 
                 self.status_led.on()
+                
+                ind = detection_reset_counter % 2
+                load_str = '|'
+                if (ind == 0):
+                    load_str = '/'
+                self.lcd.text("Detection on {0}".format(load_str), 1)
+                self.lcd.text("P: {0}, {1}".format(self.angle_x, self.angle_y), 2)
+                
                 detection_reset_counter = detection_reset_counter + 1
                 # check if we are out of attempts to detect something withing desired range
                 # e.g 30 consecutive frames and need to reset all counters to avoid premature detections
@@ -329,12 +346,14 @@ class TurretHandler:
                         
                     else:
                         detection_confidende_counter = detection_confidende_counter + 1
+                        self.lcd.text("Detected {0}".format(detection_confidende_counter), 1)
                         print("detection counter", detection_confidende_counter)
                         if( detection_confidende_counter >= detection_confidende_threshold):
                             
                             is_person_detected = self.isPersonInCurrentFrame(frame, person_class_name, person_class_detection_threshold)
                             if (is_person_detected):
                                 print("person detected - reset counter")
+                                self.lcd.text("Person detected", 1)
                                 syslog.syslog(syslog.LOG_INFO, "<Person> detected skipping detection cycle")
                                 detection_confidende_counter = 0
                                 continue
