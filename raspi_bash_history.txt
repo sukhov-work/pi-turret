@@ -25,6 +25,7 @@ unzip opencv.zip
 unzip opencv_contrib.zip
 cd ~/opencv-4.4.0/
 mkdir build
+cd bui;d
 cd build
 cmake -D CMAKE_BUILD_TYPE=RELEASE \
 make -j $(nproc)
@@ -35,15 +36,36 @@ scp
 scp -h
 exit
 ls
-ls -ltrh /dev/video*
+pwd
+exit
 libcamera-hello
+htop
+ls -ltrh /dev/video*
+sudo modprobe bcm2835-v4l2
+ls -ltrh /dev/video*
+raspi-config
+sudo raspi-config
+sudo modprobe bcm2835-v4l2
+libcamera-hello
+ls -ltrh /dev/video*
 sudo raspi-config
 v4l2-ctl --overlay=1
 sudo modprobe bcm2835-v4l2
 v4l2-ctl --overlay=1
 v4l2-ctl --overlay=0
+v4l2-ctl --help
+libcamera-hello
+raspi-config
+sudo raspi-config
+sudo reboot
+sudo raspi-config
+libcamera-hello
+df -h
+sudo modprobe bcm2835-v4l2
+rapistill
 raspistill
 sudo apt-get install raspistill
+pip install "picamera[arra
 sudo apt-get install vim
 vim  /etc/ld.so.conf.d/00-vmcs.conf
 sudo vim  /etc/ld.so.conf.d/00-vmcs.conf
@@ -58,7 +80,7 @@ df -h
 sudo raspi-config
 61b49702-7af5-4cb1-bb01-4d43fc3e3f4c
 wget http://www.airspayce.com/mikem/bcm2835/bcm2835-1.71.tar.gz
-tar zxvf bcm2835-1.71.tar.gz
+tar zxvf bcm2835-1.71.tar.gz 
 cd bcm2835-1.71/
 sudo ./configure && sudo make && sudo make check && sudo make install
 cd
@@ -74,6 +96,7 @@ ls
 gpio -v
 sudo apt-get install wiringpi
 cd
+sudo api --fix-broken install
 sudo apt --fix-broken install
 gpio -v
 sudo apt-get install p7zip-full
@@ -87,9 +110,9 @@ cd Servo_Driver/
 ls
 cd python/
 ls
-vim main.py
-python main.py
-python3 main.py
+vim main.py 
+python main.py 
+python3 main.py 
 sudo raspi-config
 sudo reboot
 gpio
@@ -100,51 +123,51 @@ cd Pan-Tilt_HAT_code/
 cd RaspberryPi/test/
 make clean
 make
-sudo ./main
-cd
+sudo ./main 
+cd 
 sudo apt-get install python-bottle
-curl -O https://bootstrap.pypa.io/ez_setup.py
-sudo python ez_setup.py
+curl -O https://bootstrap.pypa.io/ez_setup.py  
+sudo python ez_setup.py  
 sudo easy_install bottle
 python3 -m pip install bottle
 
 cd Pan-Tilt_HAT_code/RaspberryPi/web_Python/
-python main.py
+python main.py 
 libcamera-hello
 cd Pan-Tilt_HAT_code/RaspberryPi/test/
-. ./main
+. ./main 
 ls
 ./main
 ls
 cd Servo/
 ls
-cat main.c
+cat main.c 
 cd ..
 ./main
 cd ..
-python ./Servo_Driver/python/custom_test1.py
-python ./Servo_Driver/python/side_rotation_1.py
+python ./Servo_Driver/python/custom_test1.py 
+python ./Servo_Driver/python/side_rotation_1.py 
 cd web_Python/
-sudo python main.py
+sudo python main.py 
 cd ..
 cd Servo_Driver/
 ls
 cd python/
 ls
-python3 side_rotation_1.py
+python3 side_rotation_1.py 
 cd ..
 cd ,,
 cd ..
 cd web_Python/
-sudo python3 main.py
+sudo python3 main.py 
 python3 -m pip3 install bottle
 python3 -m pip install bottle
-sudo python3 main.py
+sudo python3 main.py 
 sudo apt-get install pip3
 sudo apt install python3-pip
 pip -v
 pip list
-sudo python3 main.py
+sudo python3 main.py 
 git clone https://github.com/jacksonliam/mjpg-streamer
 ls
 cd mjpg-streamer/mjpg-streamer-experimental/
@@ -162,9 +185,9 @@ sudo apt-get install cmake libjpeg8-dev
 sudo apt-get install cmake libjpeg62-turbo-dev
 sudo make clean all
 cd ../..
-sudo python3 main.py
-sudo python main.py
-python main.py
+sudo python3 main.py 
+sudo python main.py 
+python main.py 
 cd mjpg-streamer/mjpg-streamer-experimental/plugins/
 ls
 cd input_raspicam/
@@ -173,9 +196,9 @@ cd ../..
 ls
 sudo make clean all
 ls
-vim Makefile
+vim Makefile 
 vim cmake/
-vim CMakeLists.txt
+vim CMakeLists.txt 
 cd www
 ls
 cd ..
@@ -187,19 +210,19 @@ cd input_raspicam/
 ls
 sudo make clean all
 sudo cmake clean all
-sudo cmake install
-vim Makefile
+sudo cmake install 
+vim Makefile 
 ls
 ls CMakeFiles/
 cd ..
 ls
 cd plugins/input_uvc/
 ls
-cat CMakeLists.txt
+cat CMakeLists.txt 
 cd ..
 cd input_raspicam/
 ls
-cat CMakeLists.txt
+cat CMakeLists.txt 
 ls /opt/vc
 sudo ls /opt/vc
 sudo ls /opt
@@ -207,7 +230,7 @@ cd /opt
 gitf clone https://github.com/raspberrypi/firmware.git
 
 git clone https://github.com/raspberrypi/firmware.git
-ls
+ls 
 cd firm
 cd firmware/
 ls
@@ -235,10 +258,10 @@ df -h
 cd Pan-Tilt_HAT_code/RaspberryPi/web_Python/mjpg-streamer/mjpg-streamer-experimental/
 sudo cmake clean all
 sudo make clean all
-cd
+cd 
 libcamera
 libcamera-hello
-sudo raspi-config
+sudo raspi-config 
 cd /opt/vc/
 ls
 cd ..
@@ -250,53 +273,53 @@ cd Pan-Tilt_HAT_code/RaspberryPi/web_Python/mjpg-streamer/mjpg-streamer-experime
 sudo make clean all
 cd plugins/input_raspicam/
 ls
-cat CMakeLists.txt
+cat CMakeLists.txt 
 cd ../..
 sudo make clean
 sudo make clean all
 cd plugins/input_raspicam/
 ls
 cd ../..
-vim CMakeLists.txt
+vim CMakeLists.txt 
 sudo make clean all
 libcamera-still --list-cameras
 lsusb
 v4l2-ctl --list-formats-ext
 ls
 cd plugins/input_opencv/
-cat CMakeLists.txt
-vim CMakeLists.txt
+cat CMakeLists.txt 
+vim CMakeLists.txt 
 cd ../..
 sudo make clean all
 cd plugins/input_opencv/
-vim CMakeLists.txt
-cat CMakeLists.txt
-vim CMakeLists.txt
+vim CMakeLists.txt 
+cat CMakeLists.txt 
+vim CMakeLists.txt 
 cd ../..
 sudo make clean all
 cd plugins/input_opencv/
-vim CMakeLists.txt
+vim CMakeLists.txt 
 cd ..
 cd input_uvc/
-vim CMakeLists.txt
+vim CMakeLists.txt 
 cd ..
 cd input_opencv/
-vim CMakeLists.txt
+vim CMakeLists.txt 
 cd ../..
 cd plugins/input_opencv/
 cd ../..
 sudo make clean all
 cd plugins/input_opencv/
-vim input_opencv.cpp
+vim input_opencv.cpp 
 cd ../..
 sudo make clean all
 cd plugins/input_opencv/
-vim input_opencv.cpp
+vim input_opencv.cpp 
 cd ../..
 sudo make clean all
 ls
 cd plugins/input_opencv/
-cat CMakeLists.txt
+cat CMakeLists.txt 
 cd ../..
 sudo apt install v4l-utils
 ls /dev/v4l/by-id/
@@ -305,23 +328,23 @@ ls -la /dev/video*
 ls /dev/v4l/by-id/
 v4l2-ctl --list-devices
 cd Pan-Tilt_HAT_code/RaspberryPi/test/
-./main
-ps -ax
+./main 
+ps -ax 
 kill 1556
-ps -ax
+ps -ax 
 kill -9 1556
 ps -ax | grep mjpg
 kill -9 1558
 ps -ax | grep mjpg
-ps -ax
-./main
+ps -ax 
+./main 
 cd Pan-Tilt_HAT_code/RaspberryPi/test/
-./main
+./main 
 ps -ax
 ps -ax | grep python
 kill 1705
 ps -ax | grep python
-./main
+./main 
 cd opencv_test_detection/
 mkdir yolo
 cd yolo/
@@ -343,7 +366,7 @@ kill 2306
 kill 2308
 ps -ax | grep cv
 cd opencv_test_detection/YoloRunner/
-python TurretHandler.py
+python TurretHandler.py 
 htop
 libc
 libcamera
@@ -357,13 +380,12 @@ cd opencv_test_detection/
 cd YoloRunner/
 python3
 python3 main.py
-git
-ssh-keygen -t rsa -C "jaysonx1009@gmail.com"
+git 
 cat .ssh/id_rsa.pub
 cd opencv_test_detection/YoloRunner/
 ls
 touch .gitignore
-vim .gitignore
+vim .gitignore 
 git init
 git config --global init.defaultBranch main
 git status
@@ -386,8 +408,6 @@ git rm servo-test.py
 git rm -f servo-test.py
 git add .
 git commit -m "Init"
-git config --global user.email "jaysonx1009@gmail.com"
-git config --global user.name "Jayson"
 git commit -m "Init"
 git remote add origin git@github.com:sukhov-work/pi-turret.git
 git push -f
@@ -401,11 +421,11 @@ cat /etc/resolv.conf
 sudo vim /etc/resolv.conf
 ping 8.8.8.8
 sudo vim /etc/resolv.conf
-sudo vim /etc/resolvconf.conf
+sudo vim /etc/resolvconf.conf 
 sudo vim /etc/resolv.conf
 ping 8.8.8.8
 ifconfig
-cat /etc/dhcpcd.conf
+cat /etc/dhcpcd.conf 
 traceroute 8.8.8.8
 tracert 8.8.8.8
 sudo apt-get install traceroute
@@ -419,25 +439,239 @@ sudo reboot
 ifconfig
 netstat -nr
 hostname -i
-sudo vim /etc/dhcpcd.conf
+sudo vim /etc/dhcpcd.conf 
 sudo reboot
 ifconfig
 ping 8.8.8.8
 cat /etc/resolv.conf
-cat /etc/resolvconf.conf
+cat /etc/resolvconf.conf 
 cd opencv_test_detection/
 cd YoloRunner/
-vim /boot/config.txt
-sudo vim /boot/config.txt
-sudo reboot
+ls
+git push --set-upstream origin main
+git push -f --set-upstream origin main
+vim .gitignore 
+git add
+git add .gitignore 
+git commit -m "ignores"
+git push
+git pull
+ls
+git rm --cached mjpg-streamer/
+git add .
+git commit -m "clean module"
+git push origin
+git add .
+git status
+git commit -m "preserve mjpg build"
+git push origin 
 cd opencv_test_detection/YoloRunner/
-python3 TurretHandler.py
-sudo vim /boot/config.txt
-raspi-gpio get
-sudo i2cdetect -y -r 1
-sudo i2cdetect -y -r 1
-sudo i2cdetect -y -r 0
-sudo raspi-config nonint get_i2c
-sudo gpio readall
-ismod |grep i2
-lsmod |grep i2c
+cd opencv_test_detection/
+cd YoloRunner/
+git status
+git add TurretHandler.py 
+git commit -m "movement translation fixes"
+git push origin
+cd opencv_test_detection/
+cd YoloRunner/
+python TurretHandler.py 
+shutdown
+sudo shutdown
+ls
+time
+ls
+shutdownsdsd
+sudo shutdown -h
+sudo shutdown -help
+sudo shutdown --help
+sudo shutdown -P
+sudo cat ~/.bash_history
+exit
+cd opencv_test_detection/
+cd YoloRunner/
+git status
+git diff 
+git add
+git add .
+git commit -m "turret lower movement op"
+git push origin
+~/.bashrc
+cat ~/.bashrc
+cat ~/.bashhistory
+cat ~/.bash_history
+git add .
+git commit -m "bash backup history"
+git push origin
+sudo apt-get install libedgetpu1-std
+echo "deb https://packages.cloud.google.com/apt coral-edgetpu-stable main" | sudo tee /etc/apt/sources.list.d/coral-edgetpu.list
+curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -
+ping 8.8.8.8
+sudo vim /etc/dhcpcd.conf
+ping 8.8.8.8
+curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -
+sudo apt-get update
+sudo apt-get install libedgetpu1-std
+sudo apt-get install python3-pycoral
+mkdir coral
+cd coral/
+git clone https://github.com/google-coral/pycoral.git
+cd pycoral/
+bash examples/install_requirements.sh classify_image.py
+python3 examples/classify_image.py --model test_data/mobilenet_v2_1.0_224_inat_bird_quant_edgetpu.tflite --labels test_data/inat_bird_labels.txt --input test_data/parrot.jpg
+sudo i2cdetect -y 1
+sudo i2cdetect -y 0
+sudo pip3 install rpi-lcd
+sudo pip3 install rpi_lcd
+vncserver
+vncserver-x11
+sudo raspi-config
+iffconfig
+ifconfig
+exit
+cd opencv_test_detection/
+yolo export model=v8_pigeon_best.pt format=edgetpu imgsz=384,384
+pip install tensorflow
+curl -s https://raw.githubusercontent.com/sivel/speedtest-cli/master/speedtest.py | python -
+pip install tensorflow
+yolo export model=v8_pigeon_best.pt format=edgetpu imgsz=384,384
+sudo yolo export model=v8_pigeon_best.pt format=edgetpu imgsz=384,384
+sudo
+sudo -i
+pip install onnx2tf sng4onnx onnxsim onnx_graphsurgeon tflite_support
+pip uninstall onnx2tf
+pip install onnx2tf==1.17.5 sng4onnx onnxsim onnx-graphsurgeon tflite_support
+pip install nvidia-pyindex
+pip install onnx2tf==1.17.5 sng4onnx onnxsim onnx-graphsurgeon tflite_support
+pip install onnx2tf==1.17.5 sng4onnx onnxsim==0.4.33 onnx-graphsurgeon tflite_support
+pip install  --extra-index-url=https://pypi.ngc.nvidia.com --trusted-host pypi.ngc.nvidia.com onnx2tf==1.17.5 sng4onnx onnxsim==0.4.33 onnx-graphsurgeon tflite_support
+pip install -U setuptools
+pip install  --extra-index-url=https://pypi.ngc.nvidia.com --trusted-host pypi.ngc.nvidia.com onnx2tf==1.17.5 sng4onnx onnxsim==0.4.33 onnx-graphsurgeon tflite_support
+pip install --use-pep517  --extra-index-url=https://pypi.ngc.nvidia.com --trusted-host pypi.ngc.nvidia.com onnx2tf==1.17.5 sng4onnx onnxsim==0.4.33 onnx-graphsurgeon tflite_support
+pip show setuptools
+pip uninstall  setuptools
+pip install setuptools==58.0.4
+pip install --use-pep517  --extra-index-url=https://pypi.ngc.nvidia.com --trusted-host pypi.ngc.nvidia.com onnx2tf==1.17.5 sng4onnx onnxsim==0.4.33 onnx-graphsurgeon tflite_support
+pip uninstall  setuptools
+pip install  setuptools
+pip install-U  setuptools
+pip install -U  setuptools
+pip install --use-pep517  --extra-index-url=https://pypi.ngc.nvidia.com --trusted-host pypi.ngc.nvidia.com onnx2tf==1.17.5 sng4onnx onnxsim==0.4.33 onnx-graphsurgeon tflite_support
+python -version
+python --version
+python3 --verson
+python3 -v
+python3 --v
+python3 version
+python3 -version
+python3 -h
+python3 -V
+python --version
+python3 -m pip install --upgrade pip setuptools wheel
+pip install --use-pep517  --extra-index-url=https://pypi.ngc.nvidia.com --trusted-host pypi.ngc.nvidia.com onnx2tf==1.17.5 sng4onnx onnxsim==0.4.33 onnx-graphsurgeon tflite_support
+sudo apt install snapd -y
+sudo snap install core
+sudo snap install cmake --classic
+cmake --version
+sudo apt --purge remove cmake -y
+cmake --version
+sudo snap install cmake --classic
+snap help refresh
+sudo snap remove cmake
+cmake --version
+sudo snap install cmake --classic
+cmake --version
+which cmake
+hash -r
+which cmake
+cmake --version
+sudo snap install cmake --classic
+snap install cmake --classic
+cmake --version
+snap refresh
+cmake --version
+sudo apt-get update && sudo apt-get upgrade
+sudo apt-get install cmake
+sudo apt --purge remove cmake -y
+wget https://github.com/Kitware/CMake/releases/download/v3.25.0-rc4/cmake-3.25.0-rc4.tar.gz
+ls
+cd cmake-3.25.0-rc4/
+./bootstrap 
+apt-get install libssl-dev
+sudo apt-get install libssl-dev
+./bootstrap 
+gmake
+cmake --version
+hash -r
+cmake --version
+ls
+cd bin
+cmake --version
+ls
+cmake
+./cmake
+./cmake --version
+ls
+ls /usr/local/bin
+cp cmake /usr/local/bin/
+sudo cp cmake /usr/local/bin/
+cd ..
+cmake --version
+sudo rm /usr/local/bin/cmake 
+cd bin 
+sudo ln -s ~/cmake-3.25.0-rc4/bin/cmake /usr/local/bin/cmake
+cd ..
+cmake --version
+cd ..
+cd cmake-3.25.0-rc4/bin
+ls
+sudo ln -s ~/cmake-3.25.0-rc4/bin/cpack /usr/local/bin/cpack
+sudo ln -s ~/cmake-3.25.0-rc4/bin/ctest /usr/local/bin/ctest
+sudo ln -s ~/cmake-3.25.0-rc4/bin/ctresalloc /usr/local/bin/ctresalloc
+cd ../..
+pip install --use-pep517  --extra-index-url=https://pypi.ngc.nvidia.com --trusted-host pypi.ngc.nvidia.com onnx2tf==1.17.5 sng4onnx onnxsim==0.4.33 onnx-graphsurgeon tflite_support
+cd opencv_test_detection/
+yolo export model=v8_pigeon_best.pt format=edgetpu imgsz=384,384
+curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -
+echo "deb https://packages.cloud.google.com/apt coral-edgetpu-stable main" | sudo tee /etc/apt/sources.list.d/coral-edgetpu.list
+sudo apt-get update
+sudo apt-get install edgetpu-compiler
+echo "deb https://packages.cloud.google.com/apt coral-edgetpu-stable main" | sudo tee /etc/apt/sources.list.d/coral-edgetpu.list
+cd coral
+git clone https://github.com/bogdannedelcu/edgetpu-yolo.git
+python3 -m pip install opencv-python-headless
+pip install tqdm pyyaml
+ls
+cd edgetpu-yolo/
+ls
+python3 detect.py -m yolov5s-int8-224_edgetpu.tflite --bench_image
+python3 detect.py -m yolov5s-int8-96_edgetpu.tflite --bench_image
+python3 detect.py -m pigeon-y8s_edgetpu192.tflite --bench_image
+python3 detect.py -m pigeon-y8s_edgetpu640.tflite --bench_image
+python3 detect.py -m pigeon-y8s_edgetpu640.tflite --names data/pigeon.yaml --bench_image
+python3 detect.py -m pigeon-y8s_edgetpu640.tflite --names data/pigeon.yaml --bench_speed
+python3 detect.py -m pigeon-y8s_edgetpu192.tflite --names data/pigeon.yaml --bench_speed
+python3 detect.py -m pigeon-y8s_edgetpu384.tflite --names data/pigeon.yaml --bench_speed
+python3 detect.py -m pigeon-y8s_edgetpu384.tflite --names data/pigeon.yaml --stream
+apt get install libgtk2.0-dev
+apt-get install libgtk2.0-dev
+sudo apt-get install libgtk2.0-dev
+pip uninstall opencv-python-headless
+python3 detect.py -m pigeon-y8s_edgetpu384.tflite --names data/pigeon.yaml --stream
+python3 detect.py -m pigeon-y8s_edgetpu384.tflite --names data/pigeon.yaml --conf_thresh 50  --stream
+python3 detect.py -m pigeon-y8s_edgetpu384.tflite --names data/pigeon.yaml --conf_thresh 0.5  --stream
+cd opencv_test_detection/YoloRunner/
+python3 main.py 
+if config
+ifconfig
+lsof -i:8001
+lsof
+lsof :8001
+cd opencv_test_detection/
+cd YoloRunner/
+python3 main.py 
+cd ..
+python test_picamera.py 
+python test_yolo_scustom_v4.py 
+cd ..
+cd coral/edgetpu-yolo/
+python3 detect.py -m pigeon-y8s_edgetpu384.tflite --names data/pigeon.yaml --conf_thresh 0.5  --stream
