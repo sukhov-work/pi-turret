@@ -6,7 +6,9 @@
 
 A Raspberry-Pi-4-based autonomous pan/tilt turret that watches a fixed area through the Pi Camera, detects birds with a YOLOv8 model, translates the target's pixel position into pan/tilt servo angles, slews to aim, and fires (originally a laser, now being converted to a water pump). It also serves a local web page on port 8001 for status, a manual servo joystick, and a live MJPEG stream from a separate USB webcam. Autodetection is off by default and toggled from the web UI; manual servo control is allowed only while autodetection is off.
 
-The whole thing is a single Python 3.9 process plus a child `mjpg-streamer` process. There is no database, no message bus, no service-manager integration in the repo — it is run by hand with `python3 main.py`.
+The whole thing is a single Python 3.9 process plus a child `mjpg-streamer` process. There is no database, no message bus, no service-manager integration in the repo — it is run by hand with `cd v1 && python3 main.py`.
+
+> **Paths note:** all v1 files now live under **`v1/`** (relocated from the repo root). Every bare filename/path in this document is relative to `v1/` — e.g. `main.py` = `v1/main.py`, `models/` = `v1/models/`. v1's own relative paths (`./mjpg-streamer/…`, `root='./'`, `models/…`) resolve against the `v1/` working directory, which is why it is run from inside `v1/`. The hard-coded absolute SSD path (§11) is unaffected by the move.
 
 ## 2. Repository file map
 
@@ -131,7 +133,7 @@ run inside the vendored **bogdannedelcu/edgetpu-yolo** repo. That repo's decode/
 
 ## 11. Model assets and training lineage
 
-- **Active detector:** `models/v8_pigeon_best_384_int.onnx` — custom YOLOv8 trained on a Roboflow dataset with classes **`['crow','pigeon','magpie']`** (names from `models/v8_pigeon_best.yaml`), exported to ONNX and INT-quantized at 384×384. Dataset: `universe.roboflow.com/jayson-x-an0sg/pigeons-h30dy`. Training notebook: Ultralytics YOLOv8 on Colab.
+- **Active detector:** `models/v8_pigeon_best_384_int.onnx` — custom YOLOv8 trained on a Roboflow dataset with classes **`['crow','magpie','pigeon']`** in index order **crow=0, magpie=1, pigeon=2** (verified from `models/v8_pigeon_best.yaml`, `nc: 3`). `class_ids` come from `argmax` and index directly into this list, so the order matters — v1 still fires correctly because it matches by class *name*, not index. Exported to ONNX and INT-quantized at 384×384. Dataset: `universe.roboflow.com/jayson-x-an0sg/pigeons-h30dy`. Training notebook: Ultralytics YOLOv8 on Colab.
 - **Person classifier:** SSD-MobileNet-v3-Large COCO (`frozen_inference_graph.pb`, `ssd_mobilenet_v3_large_coco_2020_01_14.pbtxt`, `coco.names`), loaded from the **hard-coded absolute path** `'/home/jayson/opencv_test_detection/YoloRunner/models/ssd/'`. **Portability footgun:** this path is baked into `TurretHandler.__init__`; on any other layout the detector init will fail. v2 phase 1 drops this model.
 - **Coral model:** `pigeon-y8s_edgetpu384.tflite` (and 192/640 variants) in `edgetpu-yolo/`.
 

@@ -11,6 +11,22 @@ never editing v1 in place. Hardware is fixed; Debian 11 Bullseye + Python 3.9 is
 - `.claude/claude-docs/pi-turret-v1-legacy-design.md` — what exists today (file map, servo math, GPIO map, footguns).
 - `.claude/claude-docs/IMPLEMENTATION_PLAN.md` — the build plan. If missing, generate it first (see the skill).
 
+## Conventions — check before writing v2 code
+| Convention | Path |
+|---|---|
+| Architecture & concurrency (threaded, non-blocking, single-slot buffers) | `.claude/conventions/architecture.md` |
+| Naming (units in names; don't copy v1 typos) | `.claude/conventions/naming.md` |
+| Error handling (fail to a safe state on any actuator error) | `.claude/conventions/error-handling.md` |
+| Hardware & safety (clamps, power, fire, interlock, Coral) | `.claude/conventions/hardware-safety.md` |
+| Testing (Mac/Strix/Pi split; decode-vs-reference golden test) | `.claude/conventions/testing.md` |
+
+## Knowledge search order
+1. **Serena memories** (`list_memories` → `read_memory`) — prior decisions, gotchas, machine setup
+2. `.claude/claude-docs/` — design (V2), as-built (v1), build plan (IMPLEMENTATION_PLAN)
+3. `.claude/conventions/` — coding standards
+4. Codebase — `Grep` / `Read` (Serena semantic nav when its backend is connected)
+5. External — `WebSearch` for current library/version facts (Ultralytics / pycoral / picamera2 move fast; don't trust version-pinned commands in the docs)
+
 ## Three machines — do not confuse them
 | Machine | Use for | Truth it holds |
 |---|---|---|
@@ -33,8 +49,8 @@ never editing v1 in place. Hardware is fixed; Debian 11 Bullseye + Python 3.9 is
 
 ## Commands
 ```bash
-# Run v1 (rollback reference) — on the Pi
-python3 main.py                      # Bottle UI on :8001
+# Run v1 (rollback reference) — on the Pi, from inside the v1/ folder
+cd v1 && python3 main.py             # Bottle UI on :8001
 
 # Tests (pure logic: decode, NMS, calibration, controller, state machine) — on the Mac
 python -m pytest tests/ -v
@@ -49,17 +65,20 @@ yolo export model=best.pt format=edgetpu imgsz=256 int8=True data=bird.yaml nms=
 The v2 venv/layout and exact test runner are set in Phase 0 of the plan — confirm before assuming.
 
 ## Repo layout
-- **v1 (do not edit):** `main.py`, `TurretHandler.py`, `YOLOv8.py`, `PCA9685.py`, `Utils.py`,
-  `models/`, `edgetpu-yolo/`, `mjpg-streamer/`, `index.html`.
+- **v1 (do not edit) — all under `v1/`:** `v1/main.py`, `v1/TurretHandler.py`, `v1/YOLOv8.py`,
+  `v1/PCA9685.py`, `v1/Utils.py`, `v1/models/`, `v1/edgetpu-yolo/`, `v1/mjpg-streamer/`, `v1/index.html`.
+  Run it with `cd v1 && python3 main.py` — v1's relative paths resolve against the `v1/` CWD.
 - **v2 (build here):** new tree + venv per the plan; v1 stays runnable.
 
 ## Top footguns
-- `TurretHandler.py` runs a full hardware-init + infinite detection loop **at import** (trailing
+- `v1/TurretHandler.py` runs a full hardware-init + infinite detection loop **at import** (trailing
   unguarded module code). Guard all run blocks with `if __name__ == '__main__':`.
 - Two cameras: **Pi Camera = detection** (not streamed), **USB webcam = stream** (not detection).
 - The SSD person path uses a **hard-coded absolute model path**; v2 phase 1 drops it anyway.
 - v1's gradual servo slew can take **~2.8 s** and blocks during fire — v2 replaces it with a
   closed loop and non-blocking fire.
 
-After meaningful work, append a one-line entry to `.claude/claude-docs/DECISIONS.md` and update this file if a
-constraint or workflow changed.
+## After meaningful work
+- Append a one-line entry to `.claude/claude-docs/DECISIONS.md` (what was decided, files touched, any number measured on-device).
+- Persist durable, non-obvious findings as a **Serena memory** (`write_memory`). Naming: `architecture/<component>`, `decisions/<topic>`, `patterns/<pattern>`, `bugs/<issue>`. Invariants and code over prose; one memory per logical unit.
+- Update this file if a constraint or workflow changed.

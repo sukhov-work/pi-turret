@@ -6,7 +6,7 @@ description: >
   implementation plan from the design docs, then implements, fixes, designs, and researches
   against it. Use this skill for ANY pi-turret work: "implement", "build", "add", "fix",
   "debug", "design", "plan", "investigate", "research", any Phase/Step reference
-  (e.g. "Phase 1", "the NCNN backend step"), or any task touching detection, the Edge-TPU
+  (e.g. "Phase 1", "the Coral decode step"), or any task touching detection, the Edge-TPU
   model pipeline, decode/NMS, tracking, aiming/calibration, servos/PCA9685, the pump,
   picamera2, the Bottle/stream layer, or the on-device environment. Trigger it even when the
   user names a component without saying "skill" (e.g. "the decode is wrong", "wire up the
@@ -16,7 +16,7 @@ argument-hint: <what to build, fix, investigate, or design>
 usage: /turret <task description>
 examples:
   - /turret build the v2 implementation plan from the design docs
-  - /turret implement Phase 1 — NCNN single-class bird detector with correct v8 decode
+  - /turret implement Phase 1 — Coral single-class bird detector with correct v8 decode
   - /turret fix the Edge-TPU model: boxes are garbage
   - /turret design the closed-loop pixel-error -> servo controller
   - /turret research current Ultralytics NCNN export flags for Pi 4
@@ -51,6 +51,17 @@ If these files live elsewhere, locate them with Glob before assuming they are mi
 "Runs on the Mac" never means "verified" for anything involving the camera, the Coral, servos,
 the pump, or real timing. Those are Pi-only facts.
 
+## Investigation discipline (every phase)
+
+- **Cite or flag.** Every non-trivial claim cites its source — `file:line`, a doc section, a
+  measured number, or a URL — or is labelled **UNVERIFIED**. Trust order: **source code >
+  library source > official docs > blog/forum.** Docs go stale; the code can't lie.
+- **Confidence-gate.** Attach a rough confidence to each conclusion. **≥70%** → act on it.
+  **<30%** → the evidence isn't there; fall back, mark for an on-device check, or ask.
+  **In between** → reformulate once, then move on. Don't re-investigate a settled (≥70%) claim.
+- **Hardware truth is Pi-only.** Any claim about FPS, accuracy, aiming, servo behaviour, or
+  timing is UNVERIFIED until measured on the Pi — however clean the logic looks on the Mac.
+
 ## Workflow
 
 ```
@@ -77,10 +88,35 @@ docs (Ultralytics/pycoral/onnx2tf move fast); the docs give the approach, the we
 
 ### Phase 1 — Parallel research (when needed)
 
-Launch independent explorations in a **single message** (parallel subagents/Task calls), each
-with the task context + specific questions. Use it for: current Ultralytics export flags, pycoral
-API on this runtime, picamera2 patterns on Bullseye/Pi 4, controller/tracking references. Skip it
-when the two design docs already settle the question — most do.
+Launch independent explorations in a **single message** (parallel `Agent`/Task calls) — never
+serialize independent tracks. Each sub-agent gets the **shared context block** + its agent file +
+specific questions. Skip Phase 1 entirely when the design docs already settle the question (most do).
+
+**Shared context block** — paste into every sub-agent prompt:
+```
+Task: <request>   | Type: Implement | Fix | Design | Research
+Component(s): <detect / track / strategy / aim / actuate / app / ...>
+v2 design ref: <V2-design-plan §>     v1 as-built ref: <legacy doc §>
+Plan step: <IMPLEMENTATION_PLAN step>  Machine: Mac | Strix | Pi
+Constraints: <relevant non-negotiables>   Question(s): <what to answer>
+```
+
+**Agent menu** (`.claude/skills/turret/agents/`):
+| Agent | Use for | File |
+|---|---|---|
+| Codebase | map v1 as-built / existing v2 code before changing it | `agents/codebase-agent.md` |
+| Library research | current Ultralytics / pycoral / picamera2 / ONNX / NCNN facts on ARM/Pi | `agents/library-research-agent.md` |
+| Design reference | check a plan against the v2 docs + conventions before coding | `agents/design-agent.md` |
+
+**Output contract** — every sub-agent returns exactly this, terse, tables over prose:
+```
+## Findings: <agent>
+### Key facts          - <fact>: <source — file:line | doc § | URL | measured-on-Pi>
+### Data               | ... | ... |     (inventory / comparison table)
+### Confidence: XX%
+### Gaps / UNVERIFIED:  <what couldn't be confirmed; what needs the Pi>
+```
+Synthesize the returns in the main thread; cross-check any safety- or aiming-critical claim against ≥2 sources.
 
 ### Phase 2 — Execute
 
@@ -90,14 +126,27 @@ together, keep changes inside the v2 tree. Honor the Hard Constraints below.
 **Fix** — reproduce the failure, locate with Grep/Read, find the root cause, make the *minimal*
 change, add a regression test. Don't refactor while fixing.
 
-**Design / Plan** — synthesize findings, lay out 2–4 options in a table (Complexity S/M/L · Fits
-v2 design yes/partial/no · Risk H/M/L · Where it runs Mac/Strix/Pi), recommend one with rationale,
-write the deliverable to `.claude/claude-docs/plans/<topic>-{adr|plan|research}.md`. **Building the implementation
-plan** is a Design task: turn the v2 doc's phased migration table into `.claude/claude-docs/IMPLEMENTATION_PLAN.md`
-where every step has — goal, files to touch, which machine runs it, validation criteria, rollback.
-Keep the phase order from the v2 doc: Phase 0 venv → Phase 1 fire-at-any-bird (NCNN single-class +
-correct v8 decode + closed-loop aim + non-blocking fire) → Phase 2 correct Edge-TPU path → Phase 3
-UX → Phase 4 species + human interlock. Build only what the current phase needs.
+**Design / Plan** — synthesize findings, then:
+- **Gap analysis** (non-trivial designs): what's missing across four axes — *data-shape* (frame/
+  tensor/dataclass contracts), *capability* (can the backend/lib actually do it on this hardware),
+  *wiring/interface* (how layers/threads connect), *downstream consumers* (web UI, scripts, configs
+  that break). The consumer/wiring gaps are the silent killers.
+- **Options table**, 2–4 rows: Complexity S/M/L · Fits v2 design yes/partial/no · Risk H/M/L ·
+  Where it runs Mac/Strix/Pi. When comparing options **never say "similar" — quantify** (inputs,
+  update Hz, calibration steps, LOC, deps). Recommend one with evidence-based rationale.
+- **Conditional feasibility:** best-case score *if* `<blocker resolves>` / worst-case *if* not, plus
+  an explicit **Go/No-Go** (e.g. "GO if measured Pi FPS ≥ 24; NO-GO below 15"). Never a single
+  absolute number.
+- **Risk matrix:** Probability×Impact (1–5) with a **specific, actionable mitigation** each — a code
+  location or a test, *never* "monitor closely". Separate **blockers** (must clear before work
+  starts — a GATE) from **risks** (mitigate as you go).
+- Write the deliverable to `.claude/claude-docs/plans/<topic>-{adr|plan|research}.md`.
+
+**Building / updating `IMPLEMENTATION_PLAN.md`** is itself a Design task, and that file is the
+**authority**: where it and a design doc disagree, the plan wins (it is newer and scope-narrowed).
+Every step gets — goal, files to touch, which machine runs it, validation criteria, rollback. Follow
+the plan's phase order **and its decisions** (detector backend, firing model, stream source) rather
+than restating the design doc's earlier choices. Build only what the current phase needs.
 
 **Research** — parallel search, synthesize, report with confidence + gaps. No code.
 
@@ -142,7 +191,7 @@ if a constraint or workflow changed.
 - **PCA9685: init once; do not toggle MODE2 on/off per move.** `setPWM` already `int()`-coerces —
   the legacy float/`&` `TypeError` is already fixed; don't "re-fix" it.
 - **Keep the clamps: pan 5–47°, tilt 5–25°.** MG996R pulse band ~1000–2000 µs.
-- **Guard every module-level run block with `if __name__ == '__main__':`.** v1's `TurretHandler.py`
+- **Guard every module-level run block with `if __name__ == '__main__':`.** `v1/TurretHandler.py`
   ran a full detection loop at import — do not reproduce that.
 - **Python 3.9 on the Pi.** No `match` statements, no `X | Y` union types, no 3.10+ syntax in code
   that runs on-device.
@@ -173,4 +222,10 @@ if a constraint or workflow changed.
 | Modify v1 to "save time" | Build in the v2 tree; keep v1 as rollback |
 | Bake doc commands as gospel | Verify current flags on the web at implement time |
 | Refactor while fixing a bug | Minimal fix + regression test |
+| Serialize independent research | Launch parallel sub-agents in one message |
+| Call two approaches "similar" | Quantify the difference (dimensional comparison) |
+| State a claim with no source | Cite `file:line` / doc / URL, or mark UNVERIFIED |
+| Give an absolute feasibility score | Best/worst case with a Go/No-Go condition |
+| "Monitor closely" as a mitigation | Name the code change or test that mitigates it |
+| Re-investigate a settled (≥70%) fact | Trust it and move on |
 | Report success with failing tests | Fix failures first |

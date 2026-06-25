@@ -7,13 +7,14 @@ DNN models to detect specified classes of objects in frames, translate detected 
 
 Project consists of following parts: 
   1) Local python server based on Bottle framework that allows remote control and provides turret data and live streaming from USB webcamera
-  2) Turret servo driver (PCA9685) and image frame objects neural net detection handler module (TurretHandler.py) .
-  3) Pre trained neural network weigts (yolo8, mobilnet-ssd) for specified targets detection (YOLOv8.py)
+  2) Turret servo driver (PCA9685) and image frame objects neural net detection handler module (v1/TurretHandler.py) .
+  3) Pre trained neural network weigts (yolo8, mobilnet-ssd) for specified targets detection (v1/YOLOv8.py)
   4) Streaming server (mjpg-streamer) to handle USB webcamera real-time streaming
 
 
 ### Running
-``` python3 main.py ```
+The v1 implementation lives under `v1/`. Run it from inside that folder:
+``` cd v1 && python3 main.py ```
 
 This will start Bottle WSGI server that will be exposed locally by current raspberry IP address on port 8001, eg: `http://192.168.68.145:8001/`  or by current host name, eg `http://pi-jayson.local:8001/` 
 On the browser page the turret state and live stream through wecam is available. The autodetection is disabled by default and can be enabled via UI button. Servo controls are available only when autodetection is OFF
@@ -45,7 +46,7 @@ ONNX format - https://github.com/ibaiGorordo/ONNX-YOLOv8-Object-Detection
 Final Yolo trained model has been converted to ONNX and quantized to gain speed on per frame detection times ( ~ 3x improvement, more CPU friendly ) 
 
 Main custom yolo8 model training flow: https://colab.research.google.com/drive/1j6nrV2YI72Dps6nHEw-J-5dTGIR1PTq1?usp=sharing
-Model used in current detection flow is based on above training results in ./models/v8_pigeon_best_384_int.onnx 
+Model used in current detection flow is based on above training results in ./v1/models/v8_pigeon_best_384_int.onnx 
 
 Pigeons dataset used for training (pigeon, crow, magpie classes):  https://universe.roboflow.com/jayson-x-an0sg/pigeons-h30dy
 

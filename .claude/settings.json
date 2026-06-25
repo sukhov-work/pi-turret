@@ -1,0 +1,59 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git *)",
+      "Bash(gh *)",
+      "Bash(python *)",
+      "Bash(python3 *)",
+      "Bash(python -m venv *)",
+      "Bash(python -m pytest *)",
+      "Bash(pytest *)",
+      "Bash(pip *)",
+      "Bash(ssh *)",
+      "Bash(rsync *)",
+      "Bash(scp *)",
+      "Bash(ls *)",
+      "Bash(find *)",
+      "Bash(wc *)",
+      "Read(**)",
+      "Edit(.claude/**)",
+      "Write(.claude/**)",
+      "Edit(.serena/**)",
+      "Write(.serena/**)",
+      "Edit(tests/**)",
+      "Write(tests/**)",
+      "mcp__serena__*"
+    ],
+    "deny": [
+      "Bash(rm -rf *)",
+      "Edit(v1/**)",
+      "Write(v1/**)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/yevhens/Projects/personal/pi-turret/.claude/hooks/activate-serena.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/yevhens/Projects/personal/pi-turret/.claude/hooks/session-end.sh",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}

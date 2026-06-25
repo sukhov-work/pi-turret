@@ -2,6 +2,22 @@
 
 *Prepared for Yevhen (sukhov-work). Current date: June 2026. Hardware fixed; Debian 11 Bullseye + Python 3.9 retained. Build v2 alongside the working v1.*
 
+> **Status & supersession (read first).** This is the *rationale / "why"* document. The authoritative
+> *"what to build"* is **`IMPLEMENTATION_PLAN.md`**; **where this doc and the plan disagree, the plan wins**
+> (it is newer and scope-narrowed). The plan has since locked these decisions, overriding the matching
+> recommendations below:
+> - **Phase-1 detector:** the plan makes the **Coral Edge-TPU YOLOv8n INT8 @256 the primary**, with an
+>   **SSDLite-MobileDet @320 fallback**, chosen by a compile gate (plan D1). The "NCNN single-class on the
+>   Pi 4 CPU as the Phase-1 backend" recommendation here is demoted to a fallback/option.
+> - **Firing model:** the plan uses a **trip-wire kill-zone + predictive lead** (plan D2), *not* the reactive
+>   closed-loop visual servoing proposed here. The P/PI controller survives only as the aim gate, not the firing paradigm.
+> - **Streaming:** the plan keeps the **USB webcam as the default (headless) stream source**, with the annotated
+>   Pi-Camera view debug-only and mjpg-streamer retained as a rollback (plan D4 / §1.12) — not the "remove
+>   mjpg-streamer, stream annotated Pi-Camera frames" proposal in §D/§G.
+> - **Edge-TPU model family:** **YOLOv8n** (not YOLO11n) for the Coral path, per the plan.
+>
+> The Edge-TPU pipeline mechanics, calibration/parallax math, concurrency model, and power/servo guidance below remain valid.
+
 ## TL;DR
 - **The detection-accuracy collapse on the Coral path is a software decode bug, not a TPU or quantization failure.** `pigeon-y8s_edgetpu384.tflite` is a YOLOv8 model (anchor-free, output `[1, 4+nc, 8400]`, **no objectness channel**), but the bogdannedelcu/edgetpu-yolo `detect.py` decodes it as YOLOv5 (anchor-based, `[1, 25200, 85]`, objectness at index 4, channels-last). A v5 decoder applied to v8 output reads the wrong axes plus a channel that does not exist → garbage boxes even when the TPU compile and INT8 quantization are perfect. **Fix the decoder first; it is the single highest-leverage change.**
 - **Recommended Phase-1 backend: NCNN single-class "bird" YOLO11n/YOLOv8n on the Pi 4 CPU** — Ultralytics-documented as the fastest Pi format, ~2× faster than ONNX, and it lets you delete the fragile custom OpenCV build. **Performance path:** a correctly re-exported INT8 YOLOv8n at 192–256 px on the Coral with proper v8 decode (lowest inference latency, but real op-mapping/accuracy caveats).
@@ -23,7 +39,7 @@
 
 ### A. Model + Inference Backend (highest priority)
 
-**Current path diagnosis.** Detection runs an INT-quantized ONNX YOLOv8 through OpenCV `cv2.dnn` on the CPU; the Coral is not in the hot path. cv2.dnn INT8 on ARM is slow, and the custom OpenCV 4.4.0 source build (Ubuntu Xenial libjasper hack) is the most fragile component in the stack.
+**Current path diagnosis.** Detection runs an INT-quantized ONNX YOLOv8 through **ONNX Runtime** on the CPU — *not* OpenCV `cv2.dnn` (`cv2.dnn` is used only for the SSD person check; verified in the v1 as-built doc §5/§13). The Coral is not in the hot path. ONNX-Runtime INT8 on the ARM CPU is slow, and the custom OpenCV 4.4.0 source build (Ubuntu Xenial libjasper hack) — still needed for the SSD check and box drawing — is the most fragile component in the stack.
 
 **Option comparison (Pi 4 + Coral USB / Pi 4 CPU):**
 
@@ -41,6 +57,8 @@ All latency figures above are from Pi 4B (Coral) or Pi-5-class (NCNN/OpenVINO/MN
 **Generic COCO "bird" vs finetuned single class.** Stock COCO has a "bird" class (index 14), but it is trained mostly on large, centered birds and will under-detect small/distant/perched garden birds. **Recommendation: a finetuned single-class "bird" model** — reuse the Roboflow pigeon/crow/magpie dataset, collapse all labels to one "bird" class. It will materially outperform COCO-bird at low input resolution, and single-class shrinks the head to `[1,5,8400]`, simplifying decode.
 
 **Model family in 2026.** YOLOv8n and YOLO11n both export and run well via NCNN; YOLO11n is marginally leaner/faster at similar accuracy. For Edge TPU specifically, **YOLOv8n compiles more cleanly than YOLO11n** — multiple reports (Ultralytics issue #19336) show YOLO11's head ops ("More than one subgraph is not supported"; TRANSPOSE/RESHAPE/SOFTMAX) falling to CPU, while YOLOv8n maps the bulk of CONV_2D/LOGISTIC to the TPU. YOLOv5 is anchor-based with lower mAP and is only a fallback if v8 head ops won't map. **Net: YOLO11n (NCNN/CPU path) for reliability; YOLOv8n for the Edge-TPU path.** (Newer Ultralytics families exist but offer no Edge-TPU advantage here and add risk.)
+
+> **2026 update (`plans/coral-detector-selection-research.md`).** A dedicated Coral-detector study recommends making **SSDLite-MobileDet@320 the production default** — the only detector with a guaranteed clean single-subgraph compile — with single-class YOLOv8n@256 as a compile-gated upgrade and **SpaghettiNet-EdgeTPU** as the top accuracy-at-equal-latency candidate. It also confirms **resolution, not model family, is the dominant small-bird accuracy lever** (INT8 AP_small roughly triples 320→640).
 
 **Small-target reality.** YOLO mAP degrades sharply on objects <32×32 px and at low input resolution (multiple aerial/small-object studies). At 192–256 px Coral inputs, distant birds may be only a few pixels — expect misses. This argues for (a) a finetuned bird model, (b) the largest input size that still maps to the TPU, and (c) accepting the NCNN CPU path at 320–416 px when small-bird recall matters more than latency.
 
@@ -76,7 +94,7 @@ Run all export/compile on the x86-64 Strix Halo Ubuntu 25 workstation (native or
 
 ### E. Concurrency / Software Architecture
 
-Current `main.py` (Bottle server + blocking while-True detection daemon + 50 ms `threading.Timer` control loop, detection loop blocking for seconds during fire) means nothing tracks during/after firing, and the PCA9685 is toggled on/exit per move. v2:
+Current `v1/main.py` (Bottle server + blocking while-True detection daemon + 50 ms `threading.Timer` control loop, detection loop blocking for seconds during fire) means nothing tracks during/after firing, and the PCA9685 is toggled on/exit per move. v2:
 
 - **Use threads, not asyncio/multiprocessing.** Python 3.9's GIL is not a blocker here because the Coral/USB native invoke releases the GIL during the call (pycoral treats Edge TPU ops as I/O-bound), and NCNN inference is in native code. Layout:
   - **Capture thread** (picamera2 callback) → publishes the latest frame to a single-slot buffer.
@@ -89,7 +107,7 @@ Current `main.py` (Bottle server + blocking while-True detection daemon + 50 ms 
 
 ### F. Servo / Actuation Layer
 
-- **Fix the float/int bitwise bug:** the `TypeError: unsupported operand & between float and int` comes from a float reaching a bitwise op — coerce with `int()` before register writes / `&`.
+- **Float/int bitwise bug — already fixed; do not re-fix.** `PCA9685.setPWM` already coerces with `int()`; the `TypeError: unsupported operand & between float and int` came from the stock Waveshare driver and is gone in this repo (confirmed in v1 as-built §13 #7 and plan Step 1.7).
 - **Stop toggling the PCA9685 on/off per move:** initialize once and leave it running; the per-move start/exit pattern adds latency and jitter.
 - **Use a maintained library:** `adafruit-circuitpython-pca9685` + `adafruit-circuitpython-servokit`. Set `pca.frequency = 50` (20 ms period, correct for MG996R). Map angles with `kit.servo[ch].set_pulse_width_range(min, max)`; keep MG996R in the **~1000–2000 µs** band (full ~500–2500 µs risks gear/winding damage). Retain the existing pan 5–47° / tilt 5–25° clamps.
 - **Smooth motion:** step toward the target angle in small increments per control tick rather than large jumps — less jitter and lower current spikes.

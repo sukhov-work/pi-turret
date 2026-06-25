@@ -11,7 +11,7 @@ In scope (P1): single-class "bird" detection correctly adapted to the Coral; tra
 Explicitly deferred (later phases, but leave seams): species classification (pigeon/etc.), human-safety interlock, deterrent escalation, scheduling, dashboards.
 
 **Locked decisions (override in place if you disagree):**
-- **D1 — Detector is chosen by a compile gate, not assumed.** Primary: single-class YOLOv8n INT8 @256, correct anchor-free decode. Fallback: SSDLite-MobileDet @320 (clean Edge-TPU op-map, 9.1 ms, 32.9 mAP). Both expose the **same `Detection` output contract**, so nothing downstream depends on which won. (Research Part A: YOLO head TRANSPOSE/SOFTMAX may split to CPU and cost 1000+ ms; MobileDet maps cleanly and fits SRAM.)
+- **D1 — Detector is chosen by a compile gate, not assumed.** Primary: single-class YOLOv8n INT8 @256, correct anchor-free decode. Fallback: SSDLite-MobileDet @320 (clean Edge-TPU op-map, 9.1 ms, 32.9 mAP). Both expose the **same `Detection` output contract**, so nothing downstream depends on which won. (Research Part A: YOLO head TRANSPOSE/SOFTMAX may split to CPU and cost 1000+ ms; MobileDet maps cleanly and fits SRAM.) **2026 research update (see `plans/coral-detector-selection-research.md`):** the safer production default is to **invert** this — ship MobileDet@320 first (the only guaranteed clean single-subgraph compile) and treat single-class YOLOv8n@256 as the compile-gated upgrade; **SpaghettiNet-EdgeTPU** is the top accuracy-at-equal-latency candidate worth a bake-off.
 - **D2 — Firing model is trip-wire kill-zone + predictive lead**, not reactive visual servoing. Water time-of-flight (~0.3–0.6 s) + servo travel dominate the budget; you get one led shot. Tracking/scoring run full-frame; the kill-zone is only the fire gate.
 - **D3 — Detection runs on a motion-gated path is OPTIONAL in P1.** Build the detector path first (full-frame TPU each tick). Leave a clean seam for the motion-first/ROI-confirm optimization (research's top accuracy+latency win) as Step 1.10, behind a config flag, so it can be added without touching the tracker/controller.
 - **D4 — Headless by default.** No frame rendering in live mode. Annotation/streaming are opt-in and run on a separate thread that can be killed without affecting the control loop.
@@ -73,7 +73,7 @@ pi-turret-v2/
 
 | # | Step | Goal | Files | Machine | Validation | Rollback |
 |---|---|---|---|---|---|---|
-| 0.1 | v2 tree + venv | Isolated v2; v1 untouched | new `pi-turret-v2/`, venv | Mac + Pi | v1 still runs (`python3 main.py`); v2 venv imports picamera2, tflite-runtime/pycoral, numpy | delete tree/venv |
+| 0.1 | v2 tree + venv | Isolated v2; v1 untouched | new `pi-turret-v2/`, venv | Mac + Pi | v1 still runs (`cd v1 && python3 main.py`); v2 venv imports picamera2, tflite-runtime/pycoral, numpy | delete tree/venv |
 | 0.2 | Config skeleton | All tunables in one typed place | `config.py`, `config.yaml` | Mac | loads, validates, round-trips | n/a |
 | 0.3 | Detection contract | Freeze `Detection`/`Track` dataclasses so threads can be built in parallel | `detect/base.py`, `track/tracker.py` stubs | Mac | importable; documented fields | n/a |
 
@@ -85,7 +85,7 @@ pi-turret-v2/
 - **Goal:** a single-class "bird" INT8 model running on the Edge TPU with a **correct anchor-free decode** (`[1,5,8400]` → transpose → `boxes=out[:,:4]` xywh×input → `scores=out[:,4:]` → threshold → NMS; **no objectness multiply, no YOLOv5 path**).
 - **Files:** `detect/decode.py`, `detect/yolo_coral.py`, `tests/test_decode.py`.
 - **Machine:** export/compile on **Strix Halo (x86-64 only)**; run on **Pi**; unit-test decode on **Mac**.
-- **The gate:** read the `edgetpu_compiler` log. If the YOLOv8n head maps to **one subgraph, ops on TPU ≫ CPU** → keep YOLOv8n. If it **splits** (TRANSPOSE/SOFTMAX to CPU, "more than one subgraph") → switch to Step 1.1b.
+- **The gate:** read the `edgetpu_compiler` log. If the YOLOv8n head maps to **one subgraph, ops on TPU ≫ CPU** → keep YOLOv8n. If it **splits** (TRANSPOSE/SOFTMAX to CPU, "more than one subgraph") → switch to Step 1.1b. Concretely, accept a candidate only if `edgetpu_compiler -s` reports **`Number of Edge TPU subgraphs: 1`** and **`Off-chip memory used for streaming: 0.00B`**; export YOLO with **`nms=False dynamic=False`** to map the most ops. (Candidate matrix + the recommended MobileDet-default: `plans/coral-detector-selection-research.md`.)
 - **Validation:** decode unit-tested against an Ultralytics `model.predict` reference on a saved frame (guards the v5/v8 mismatch forever); on-Pi `model` returns sane boxes on a real frame; measured inference latency recorded.
 - **Rollback:** v1's ONNX-CPU detector still exists in the v1 tree.
 
