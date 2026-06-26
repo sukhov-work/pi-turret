@@ -193,3 +193,78 @@ pi-turret-v2/
 - Measured per-stage latency budget on this exact Pi 4 (drives whether 1.10 motion-gating is needed for P1 or deferred).
 - Real water-stream velocity/range → the lead and aim-above constants (Step 1.6).
 - Snapshot volume/retention policy (SD wear) — sample rate vs fire-only.
+
+## 8. Build status, wiring, and added steps (updated 2026-06-27)
+
+Authored + unit-tested on the **Mac** (`.venv-v2`, Python 3.9.6) — **146 passed / 1 skipped**.
+v1 untouched. v2 lives at the **repo root** (top-level packages; imports are `from detect import …`,
+deploy is `rsync ./ → ~/pi-turret-v2/`). Run tests: `.venv-v2/bin/python -m pytest -q`.
+
+### Per-step status
+| Step | Status | What finishes it (machine) |
+|---|---|---|
+| 0.1–0.3 foundation (tree/venv, `config`, `contracts`) | **DONE (Mac)** | — |
+| 1.1 `decode_v8` + NMS + golden guard | **DONE (Mac logic)** | export+compile+latency + **capture golden fixture** (Strix/Pi) |
+| 1.1b MobileDet fallback | TODO | Strix/Pi, only if 1.1 gate fails |
+| 1.2 `capture.py` PiCam lores YUV420 | AUTHORED | FPS/focus truth (Pi) |
+| 1.3/1.4 `IouTracker` + lead predictor | **DONE (Mac)** | tune on a recorded Pi clip |
+| 1.5 scoring + hysteresis selector | **DONE (Mac)** | tune weights on-device |
+| 1.6 calibration apply+fit (v1 preset) | **DONE (Mac)** | run the **fit on the Pi rig** |
+| 1.7 controller + `pca9685` port + `ServoController` | **DONE (Mac logic)** | servo dry-run within clamps (Pi) |
+| 1.8 `FireStateMachine` + `killzone` + `Pump` | **DONE (Mac)** | LED-stand-in + decoy fire (Pi) |
+| 1.9 headless + `annotate`/`snapshots` | AUTHORED (partial) | measure zero render cost (Pi) |
+| 1.10 motion-gated seam | TODO | behind `app.detection_mode` flag |
+| 1.11 web UI (Bottle) | **TODO** | author + Pi |
+| 1.12 USB-webcam streamer | **TODO** | author + Pi |
+| 1.13 LCD lifecycle display (`actuate/lcd.py`, `app/display.py`) | **DONE (Mac logic)** | verify on real LCD (Pi) |
+| 1.14 status LED + aux marker (`actuate/indicators.py`) | **DONE (Mac)** | verify BCM23/27 (Pi) |
+| 1.15 IR remote (`app/remote.py` seam + `RemoteConfig`) | **SEAM ONLY** | owner: confirm pin; capture keys (Pi) |
+
+**Open flags:** (a) `decode_v8.coords_normalized` default is UNVERIFIED until the real-model golden
+fixture lands (`tests/fixtures/raw_output.npy` + `predict_ref.json`); (b) servo pulse band — docs
+cite ~1000–2000 µs but v1 actually runs ~556–1023 µs, so v2 keeps v1's mapping + a `[500,2500] µs`
+guard (re-measure on Pi).
+
+### Wiring map (FIXED — verified from v1 source, do NOT rewire)
+From `v1/TurretHandler.py:40-51` + `v1/PCA9685.py:32`. v2 reuses every pin; **escalate before any rewire.**
+New hardware is **additive on free pins only.**
+
+| Function | Bus / pin | v2 owner |
+|---|---|---|
+| PCA9685 servo driver | I2C **bus 1** @ `0x40` | `actuate/pca9685.py` |
+| 1602A LCD | I2C **bus 1** (`rpi_lcd`, ~`0x27`) | `actuate/lcd.py` |
+| Pan / Tilt servo | PCA9685 **ch 1 / ch 0** | `ServoConfig` |
+| Water pump (was "main laser") | GPIO **BCM 26** (relay/MOSFET + flyback) | `actuate/pump.py` |
+| Aux laser / aim marker | GPIO **BCM 27** (opt-in) | `actuate/indicators.py` |
+| Status LED | GPIO **BCM 23** | `actuate/indicators.py` |
+| IR receiver (PROPOSED) | GPIO **BCM 17** (free; confirm) | `app/remote.py` |
+
+Free pins besides BCM17: 4/5/6/12/13/16/18/19/20/21/22/24/25 + SPI block. BCM 2/3 = I2C; 23/26/27 in use.
+
+### Step 1.13 — LCD lifecycle display *(done on Mac; verify on Pi)*
+- **Goal:** surface useful info throughout the run on the 1602A (16×2): boot + LAN IP, then per state —
+  SEARCHING (`SCAN <spin> <fps> / trk:N ARM|SAFE`), AIMING (`AIM#id e<err> / KZ:Y WF ARM`), FIRING
+  (`FIRE! #id / shots:N`), COOLDOWN, SAFE. v1 only showed on/off + angles.
+- **Files:** `actuate/lcd.py` (`StatusLcd`, fail-safe device), `app/display.py` (`format_lcd_lines` pure +
+  `LcdReporter` low-rate thread, never blocks control). Wired in `main.py` + `Pipeline` (fps + shots).
+- **Validation:** `format_lcd_lines` unit-tested (truncation + per-state content); on-Pi the LCD updates
+  at `app.lcd_refresh_hz` and never stalls the control loop; LCD I2C errors are swallowed.
+
+### Step 1.14 — Status LED + aux marker *(done on Mac; verify on Pi)*
+- **Goal:** drive v1's BCM23 status LED (on while not SAFE) and BCM27 aux laser as an **opt-in** aim
+  marker (default off — laser safety; `app.aux_marker_enabled`). Fail-safe, off on disarm.
+- **Files:** `actuate/indicators.py` (`GpioOutput`, `gpiozero.LED` like v1); toggled in `ControlLoop`.
+- **Validation:** unit-tested status-LED-tracks-state + fail-safe; on-Pi confirm BCM23/27 behavior.
+
+### Step 1.15 — IR remote control *(PROPOSED — seam only)*
+- **Goal:** start/stop + basic control (arm/disarm, toggle fire-enable, center, jog pan/tilt) from a simple
+  IR remote (owner's old Arduino kit). v1 has **no GPIO inputs**, so this is purely additive.
+- **Approach (decide on Pi):** rc-core + evdev via `dtoverlay=gpio-ir,gpio_pin=17` (recommended on
+  Bullseye) → remote shows up as `/dev/input/eventN`; capture key names with `ir-keytable -t`. Alternatives:
+  LIRC, or pigpio software decode (no overlay).
+- **Files:** `app/remote.py` (`RemoteActions` ABC, `build_key_map` pure, `RemoteListener` evdev thread,
+  lazy import), `RemoteConfig` in `config.py`, `TurretRemoteActions` in `main.py`.
+- **GATE (owner):** confirm the receiver pin (proposed **BCM 17**) and add the dtoverlay; then capture the
+  remote's key codes on the Pi and fill `RemoteConfig` key fields.
+- **Validation:** `build_key_map` unit-tested; on-Pi a key-down dispatches its action without affecting the
+  control loop; remote errors are best-effort (never crash control).

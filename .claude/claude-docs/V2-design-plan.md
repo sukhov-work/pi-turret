@@ -165,3 +165,23 @@ mjpg-streamer with the custom `input_opencv.so` plugin (built because `input_ras
 - **Nozzle parallax + water drop** must be calibrated by test-firing at the real engagement distance.
 - **USB 2.0 vs 3.0:** Coral throughput drops ~3× on USB 2.0 — confirm the Pi 4's blue USB 3.0 port is used.
 - **Whether YOLO11n head ops map on this Coral compiler version** is uncertain; YOLOv8n is the safer Edge-TPU choice.
+
+## Operator I/O additions (2026-06-27)
+
+Reuse v1's existing hardware (no rewiring) and add one optional input. Wiring table + per-step
+plans: `IMPLEMENTATION_PLAN.md §8` (steps 1.13–1.15).
+
+- **LCD as a live lifecycle display (1602A, I2C bus 1, `rpi_lcd`, shares the bus with the PCA9685
+  @ 0x40).** v1 only showed on/off + angles. v2 surfaces, throughout the run: boot + LAN IP, then
+  per state — SEARCHING (`SCAN <spin> <fps> / trk:N ARM|SAFE`), AIMING (`AIM#id e<err> / KZ:Y WF
+  ARM`), FIRING (`FIRE! #id / shots:N`), COOLDOWN, SAFE. Rendering is a low-rate thread
+  (`app/display.py`) so I2C never blocks control; the device wrapper is fail-safe.
+- **Indicators:** BCM23 status LED (lit while not SAFE) + BCM27 aux laser as an **opt-in** aim marker
+  (default off — laser safety), via `gpiozero.LED` exactly as v1; off on disarm.
+- **IR remote (PROPOSED — owner is considering it).** A simple IR receiver (owner's old Arduino kit)
+  for start/stop + basic control: arm/disarm, toggle fire-enable, center, jog pan/tilt. v1 has **no
+  GPIO inputs**, so this is purely additive: one receiver on a free pin (proposed **BCM17**) plus
+  `dtoverlay=gpio-ir,gpio_pin=17` → the remote appears as an evdev device (rc-core); capture key
+  codes with `ir-keytable -t`. Alternatives: LIRC or pigpio software decode. Seam exists
+  (`app/remote.py` + `RemoteConfig`); **pin and key codes need owner confirmation + on-Pi capture.**
+  An IR "e-stop"/disarm key is a cheap, useful safety affordance.

@@ -2,3 +2,9 @@
 __pycache__/
 last_servo_state.txt
 /.idea
+
+# v2 tooling / artifacts
+.venv-v2/
+.pytest_cache/
+/dataset/
+

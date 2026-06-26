@@ -188,6 +188,15 @@ if a constraint or workflow changed.
   COOLDOWN. Keep tracking throughout.
 - **Pump is driven through a relay/MOSFET with a flyback diode, never a bare GPIO pin.** Servos get
   a separate 5–6 V supply with common ground; never the Pi 5 V rail.
+- **Wiring is FIXED — reuse v1's pins exactly; ESCALATE before any rewire.** Pump=**BCM26**,
+  aux laser/marker=**BCM27**, status LED=**BCM23**, PCA9685=**I2C bus 1 @ 0x40**, 1602A LCD on the
+  **same I2C bus 1** (`rpi_lcd`), pan=**ch1**/tilt=**ch0**. The owner does not want the
+  breadboard/relays/diodes rewired without a serious reason. New hardware (e.g. the proposed IR
+  receiver) is **additive on free pins only** and still must be flagged for confirmation. Full map +
+  free-pin list: `conventions/hardware-safety.md` and `IMPLEMENTATION_PLAN.md §8`.
+- **Use the LCD throughout the lifecycle** (boot+IP, state, target, aim error, kill-zone, fps, shots)
+  and keep it **fail-safe** (LCD/indicator errors are logged + swallowed, never stop control). The
+  BCM27 aux laser is an **opt-in** aim marker (default off — laser safety).
 - **PCA9685: init once; do not toggle MODE2 on/off per move.** `setPWM` already `int()`-coerces —
   the legacy float/`&` `TypeError` is already fixed; don't "re-fix" it.
 - **Keep the clamps: pan 5–47°, tilt 5–25°.** MG996R pulse band ~1000–2000 µs.

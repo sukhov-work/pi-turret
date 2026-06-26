@@ -52,3 +52,50 @@ Pigeons dataset used for training (pigeon, crow, magpie classes):  https://unive
 
 
 
+## v2 (in development)
+
+v2 is a ground-up rebuild for a **water-cannon** deterrent that detects **any bird**, tracks and
+predicts it, and fires non-blocking, with live multi-target handling and headless operation. **v1
+stays the rollback and is never edited in place** — v2 is built alongside it at the repo root, while
+v1 lives under `v1/`. Design + build details: `.claude/claude-docs/` (`V2-design-plan.md`,
+`IMPLEMENTATION_PLAN.md`, `pi-turret-v1-legacy-design.md`); coding standards: `.claude/conventions/`.
+
+### Layout (repo root = v2 root)
+`config.py` `contracts.py` `errors.py` `capture.py` `main.py` + packages `detect/ track/ strategy/
+aim/ actuate/ app/` + `tests/`. Imports are top-level (`from detect import …`).
+
+### Three machines
+- **Mac** — author code + run pure-logic `pytest`. No hardware/TPU truth.
+- **Strix Halo (x86-64)** — train/export/INT8 + `edgetpu_compiler` (the only box that compiles Coral models).
+- **Pi 4 (Bullseye, Python 3.9)** — the only source of camera/Coral/servo/FPS/aiming truth.
+
+### Build & run
+```bash
+# tests (Mac): pure-logic spine — decode, NMS, tracker, scoring, controller, state machine, LCD, ...
+python3 -m venv .venv-v2 && .venv-v2/bin/pip install -r requirements-v2.txt
+.venv-v2/bin/python -m pytest -q
+
+# deploy + run on the Pi
+rsync -av --exclude .git --exclude .venv-v2 ./ jayson@pi-jayson.local:~/pi-turret-v2/
+ssh jayson@pi-jayson.local 'cd ~/pi-turret-v2 && python3 main.py'
+```
+Fire is **disabled by default** (`fire.enabled: false` in `config.yaml`) — "would-fire" telemetry only,
+for safe bring-up. All tunables live in `config.py` / `config.yaml`.
+
+### Wiring (FIXED — reused from v1, do NOT rewire; escalate first)
+| Function | Bus / pin |
+|---|---|
+| PCA9685 servo driver | I2C **bus 1** @ `0x40` |
+| 1602A LCD (status display) | I2C **bus 1** (`rpi_lcd`) |
+| Pan / Tilt servo | PCA9685 **ch 1 / ch 0** |
+| Water pump (was v1 "main laser") | GPIO **BCM 26** (via relay/MOSFET + flyback diode) |
+| Aux laser / aim marker (opt-in) | GPIO **BCM 27** |
+| Status LED | GPIO **BCM 23** |
+| IR receiver (PROPOSED, additive) | GPIO **BCM 17** (free pin; confirm before wiring) |
+
+The **LCD** shows live lifecycle info (boot + IP, state, selected target, aim error, kill-zone, fps,
+shot count). An **IR remote** (start/stop + basic control) is under consideration — additive on a free
+pin via `dtoverlay=gpio-ir`; see `IMPLEMENTATION_PLAN.md` step 1.15.
+
+
+

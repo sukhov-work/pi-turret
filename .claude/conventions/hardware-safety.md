@@ -16,6 +16,29 @@ here (see `project/dev_environment.md` and the three-machine model).
 | **Never** drive pump or servos from the Pi 5 V rail | Same brown-out / over-current risk |
 | One common ground reference across Pi, driver board, supplies | Floating grounds = erratic PWM / phantom triggers |
 
+## Wiring map (as-built — FIXED, do not rewire)
+
+These pins are reused **exactly** from v1 (verified `v1/TurretHandler.py:40-51`, `v1/PCA9685.py:32`).
+**Escalate before changing any breadboard / relay / diode / pin assignment** — the owner does not want
+the rig rewired without a serious reason. New hardware is **additive on free pins only**, and even then
+flag it for confirmation.
+
+| Function | Bus / pin | Notes |
+|---|---|---|
+| PCA9685 servo driver | I2C bus 1 @ `0x40` | init once |
+| 1602A LCD | I2C bus 1 (`rpi_lcd`, ~`0x27`) | shares the bus with the PCA9685 — no conflict |
+| Pan / Tilt servo | PCA9685 ch **1** / ch **0** | |
+| Water pump (v1 "main laser") | GPIO **BCM 26** | relay/MOSFET + flyback diode, never bare GPIO |
+| Aux laser / aim marker | GPIO **BCM 27** | opt-in (laser safety); `gpiozero.LED` |
+| Status LED | GPIO **BCM 23** | `gpiozero.LED` |
+| IR receiver (PROPOSED) | GPIO **BCM 17** (free; confirm) | additive; `dtoverlay=gpio-ir` |
+
+Free pins besides BCM17: 4/5/6/12/13/16/18/19/20/21/22/24/25 + the SPI block. BCM 2/3 = I2C; 23/26/27 in use.
+
+**LCD + indicators are fail-safe outputs:** an I2C/GPIO error on the LCD or a status/aux indicator must
+be logged and swallowed — a flaky display never stops the turret. Drive the status LED on while not
+SAFE; keep the BCM27 aux laser marker OFF unless explicitly enabled in config.
+
 ## Actuator limits (clamp before every write)
 
 | Axis | Channel (v1) | Clamp | Notes |
