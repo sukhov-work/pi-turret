@@ -1,0 +1,24 @@
+# pi-turret v2 dependencies, grouped by machine. Install per machine (each gets
+# its own venv); the Mac only needs the pure-logic + test set.
+
+# --- Mac (author + pure-logic pytest) ---
+numpy>=1.21
+PyYAML>=5.4
+pytest>=7.0
+
+# --- Pi 4 / Bullseye / Python 3.9 (on-device runtime) ---
+# Installed via apt/piwheels on-device; versions are indicative, verify on-device.
+#   picamera2            # Pi Camera capture (lores YUV420)
+#   tflite-runtime       # or python3-pycoral for the Edge TPU
+#   pycoral              # Coral USB delegate (libedgetpu1-std)
+#   opencv-python-headless  # annotation/draw only (NOT the inference path)
+#   gpiozero             # pump relay + status LED
+#   RPi.GPIO             # gpiozero backend
+#   smbus2               # PCA9685 over I2C (drop-in for legacy smbus)
+#   bottle               # web UI (extends v1)
+#   rpi_lcd              # optional 1602A status LCD (deferred in P1)
+
+# --- Strix Halo / Ubuntu / x86-64 (model build + export + edgetpu_compiler) ---
+#   ultralytics          # train / export YOLOv8n -> tflite int8
+#   onnx, onnx2tf, onnxsim  # export toolchain (verify current flags at build time)
+#   edgetpu_compiler     # x86-64 ONLY; compiled file must end _edgetpu.tflite

@@ -1,0 +1,122 @@
+# pi-turret v2 configuration. Values here override the dataclass defaults in
+# config.py. Anything omitted falls back to the typed default. Units are in the
+# key names (_px, _deg, _us, _s). See config.py for the full field list.
+
+camera:
+  detection_source: picamera2     # picamera2 (Pi Cam) | usb
+  capture_width_px: 1152
+  capture_height_px: 1152
+  lores_format: YUV420            # Pi 4 lores must be YUV420
+  fixed_focus: true
+  lens_position: 4.0
+
+detector:
+  backend: coral_yolo             # coral_yolo | coral_mobiledet | cpu
+  model_path: models/bird_yolov8n_256_int8_edgetpu.tflite
+  input_size_px: 256
+  num_classes: 1
+  conf_threshold: 0.25
+  iou_threshold: 0.5
+  coords_normalized: false        # confirmed against model.predict on Strix/Pi
+
+tracker:
+  iou_match_threshold: 0.3
+  max_age_frames: 30
+  min_hits: 3
+  velocity_smoothing: 0.5
+
+predict:
+  lead_time_s: 0.45               # measure servo travel + water ToF on the Pi
+  fps: 20.0
+
+strategy:
+  w_killzone: 1.0
+  w_size: 0.5
+  w_dwell: 0.3
+  w_approach: 0.7
+  w_confidence: 0.4
+  dwell_norm_frames: 20
+  switch_hysteresis: 0.15
+  min_target_dwell_frames: 5
+
+killzone:
+  shape: rect                     # rect | circle
+  cx_px: 576.0
+  cy_px: 576.0
+  half_w_px: 120.0
+  half_h_px: 120.0
+  radius_px: 120.0
+
+aim:
+  # Default reproduces the v1 hand-tuned preset. Replace with a fitted transform
+  # (aim/calibrate.fit_calibration) measured on the real rig.
+  pan_coeffs: [-0.04, 0.0, 59.04]
+  tilt_coeffs: [0.0, 0.06666666666666667, -10.4]
+  parallax_pan_deg: 0.0
+  drop_tilt_deg: 0.0
+
+controller:
+  kp: 0.02
+  ki: 0.0
+  deadband_px: 8.0
+  max_step_deg: 6.0
+  integral_limit_deg: 5.0
+  backlash_takeup_deg: 1.0
+
+servo:
+  i2c_bus: 1
+  i2c_address: 0x40
+  pwm_freq_hz: 50
+  pan_channel: 1
+  tilt_channel: 0
+  pan_min_deg: 5.0
+  pan_max_deg: 47.0
+  tilt_min_deg: 5.0
+  tilt_max_deg: 25.0
+  pulse_slope_us_per_deg: 11.11111111111111
+  pulse_offset_us: 501.0
+  pulse_min_us: 500.0
+  pulse_max_us: 2500.0
+  home_pan_deg: 31.0
+  home_tilt_deg: 23.0
+
+pump:
+  pump_gpio_bcm: 26               # via relay/MOSFET + flyback diode, never bare GPIO
+  aux_gpio_bcm: 27
+  status_led_gpio_bcm: 23
+  active_high: true
+
+fire:
+  enabled: false                  # SAFE default: would-fire telemetry only
+  fire_duration_s: 1.0
+  cooldown_s: 2.0
+  aim_deadband_px: 12.0
+  require_killzone: true
+
+app:
+  annotation_mode: off            # off | fire_frames_only | full_video
+  snapshot_mode: off              # off | every | fire_only | sampled
+  snapshot_sample_every: 30
+  snapshot_dir: dataset
+  detection_mode: full_frame      # full_frame | motion_gated
+  stream_source: usb              # usb | picam_annotated
+  web_port: 8001
+  log_level: INFO
+  lcd_enabled: true               # 1602A on I2C bus 1 (rpi_lcd), shares bus with PCA9685
+  lcd_refresh_hz: 4.0
+  status_led_enabled: true        # BCM23
+  aux_marker_enabled: false       # BCM27 aux laser as aim marker — OPT-IN (laser safety)
+
+# IR remote — PROPOSED additive hardware (no v1 GPIO inputs). Confirm gpio_bcm and
+# add `dtoverlay=gpio-ir,gpio_pin=17` to /boot/config.txt before wiring. See plan 1.15.
+remote:
+  enabled: false
+  gpio_bcm: 17                    # PROPOSED free pin (BCM 2/3 I2C, 23/26/27 in use)
+  input_device: ""               # /dev/input/eventN from ir-keytable
+  key_toggle_arm: KEY_POWER
+  key_enable_fire: KEY_OK
+  key_center: KEY_HOME
+  key_pan_left: KEY_LEFT
+  key_pan_right: KEY_RIGHT
+  key_tilt_up: KEY_UP
+  key_tilt_down: KEY_DOWN

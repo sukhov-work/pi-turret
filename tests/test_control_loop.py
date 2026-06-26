@@ -1,0 +1,112 @@
+"""Integration: ControlLoop wiring honors clamps + fire predicate (Mac, fakes)."""
+import pytest
+
+from conftest import make_track
+
+from actuate.servo import Axis, ServoController
+from app.control import ControlLoop
+from app.statemachine import FireState, FireStateMachine
+from config import Config
+from strategy.selector import TargetSelector
+
+
+class FakeDriver:
+    def __init__(self):
+        self.writes = []
+
+    def set_servo_pulse(self, channel, pulse_us):
+        self.writes.append((channel, pulse_us))
+
+    def relax(self, channel):
+        pass
+
+
+def _loop(enabled=True):
+    cfg = Config()
+    cfg.fire.enabled = enabled
+    cfg.fire.aim_deadband_px = 20.0
+    drv = FakeDriver()
+    servo = ServoController(drv, cfg.servo)
+    events = []
+    sm = FireStateMachine(cfg.fire, on_fire=lambda: events.append("on"),
+                          off_fire=lambda: events.append("off"))
+    selector = TargetSelector(cfg.strategy.switch_hysteresis, min_target_dwell_frames=1)
+    loop = ControlLoop(cfg, servo, selector, sm)
+    return cfg, loop, drv, servo, events
+
+
+def test_no_tracks_searches_and_does_not_move_servo():
+    cfg, loop, drv, servo, events = _loop()
+    tel = loop.tick([])
+    assert tel.state is FireState.SEARCHING
+    assert tel.selected_target_id is None
+    assert drv.writes == []  # nothing commanded
+
+
+def test_target_in_killzone_fires_when_enabled():
+    cfg, loop, drv, servo, events = _loop(enabled=True)
+    # zero-velocity track sitting at the kill-zone center -> predicted there too
+    target = make_track(track_id=7, cx=cfg.killzone.cx_px, cy=cfg.killzone.cy_px)
+    tel = loop.tick([target])
+    assert tel.selected_target_id == 7
+    assert tel.in_killzone is True
+    assert tel.aim_error_px == pytest.approx(0.0)
+    assert tel.state is FireState.FIRING
+    assert events == ["on"]
+
+
+def test_disabled_reports_would_fire_only():
+    cfg, loop, drv, servo, events = _loop(enabled=False)
+    target = make_track(track_id=1, cx=cfg.killzone.cx_px, cy=cfg.killzone.cy_px)
+    tel = loop.tick([target])
+    assert tel.would_fire is True
+    assert tel.state is FireState.AIMING
+    assert events == []
+
+
+def test_servo_writes_stay_within_clamps():
+    cfg, loop, drv, servo, events = _loop()
+    # a far off-center target drives the servo, but it must stay within the guard
+    target = make_track(track_id=1, cx=0, cy=0, vx=0, vy=0)
+    for _ in range(10):
+        loop.tick([target])
+    for ch, pulse in drv.writes:
+        assert cfg.servo.pulse_min_us <= pulse <= cfg.servo.pulse_max_us
+        assert ch in (cfg.servo.pan_channel, cfg.servo.tilt_channel)
+
+
+def test_servo_slews_at_most_max_step_per_tick():
+    cfg, loop, drv, servo, events = _loop()
+    target = make_track(track_id=1, cx=0, cy=0)  # calibration target far from home
+    prev = servo.last_angle(Axis.PAN)
+    for _ in range(5):
+        loop.tick([target])
+        now = servo.last_angle(Axis.PAN)
+        assert abs(now - prev) <= cfg.controller.max_step_deg + 1e-9
+        prev = now
+
+
+class _FakeIndicator:
+    def __init__(self):
+        self.state = None
+
+    def set(self, value):
+        self.state = value
+
+
+def test_status_led_tracks_armed_state():
+    cfg = Config()
+    cfg.fire.enabled = True
+    cfg.fire.aim_deadband_px = 20.0
+    drv = FakeDriver()
+    servo = ServoController(drv, cfg.servo)
+    sm = FireStateMachine(cfg.fire)
+    status = _FakeIndicator()
+    loop = ControlLoop(cfg, servo, TargetSelector(min_target_dwell_frames=1), sm,
+                       status_led=status)
+    loop.tick([make_track(track_id=1, cx=cfg.killzone.cx_px, cy=cfg.killzone.cy_px)])
+    assert status.state is True            # active -> status LED on
+    sm.enter_safe()
+    loop.tick([])
+    assert status.state is False           # SAFE -> status LED off
+
