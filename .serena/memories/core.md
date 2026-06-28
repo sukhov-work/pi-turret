@@ -5,10 +5,11 @@ Raspberry Pi 4 + Coral USB autonomous pan/tilt **bird-deterrent turret** (Python
 not async). Pi Camera → single-class bird detection → servo aim → fire (pump/laser). **v1 works and
 is the rollback; v2 is built alongside it, and v1 is never edited in place.**
 
-## Three machines (detail: mem:project/dev_environment)
-- **Mac M3** — author + pure-logic `pytest` + git. No hardware/TPU truth; can't run `edgetpu_compiler`.
-- **Strix Halo (Ubuntu, x86-64)** — train/export/INT8/`edgetpu_compiler`. Only box that compiles Coral models.
-- **Pi 4 (Bullseye, `jayson@pi-jayson.local`)** — only source of camera/Coral/servo/FPS/aiming truth.
+## Three machines (detail: mem:project/dev_environment, access: mem:project/machine_access)
+- **Mac M3** — author + pure-logic `pytest` + git; **source of truth**. No hardware/TPU truth; can't run `edgetpu_compiler`.
+- **Strix Halo (Ubuntu, x86-64)** — train/export/INT8/`edgetpu_compiler`; reach `ssh strix`. Only box that compiles Coral models.
+- **Pi 4 (Bullseye)** — only source of camera/Coral/servo/FPS/aiming truth; reach `ssh pi`.
+- Access over Tailscale (creds in `.claude/.env`, gitignored). **Deploy = `git push pi|strix main`** (push-to-checkout to `~/pi-turret`), not rsync.
 
 ## Source layout
 - v1 (do NOT edit): all under `v1/` — `v1/main.py`, `v1/TurretHandler.py`, `v1/YOLOv8.py`, `v1/PCA9685.py`,
@@ -33,4 +34,5 @@ Conventions: `.claude/conventions/`. Workflow: the `/turret` skill.
 - `mem:suggested_commands` — run / test / deploy / export commands
 - `mem:task_completion` — quality gate before claiming done
 - `mem:project/dev_environment` — three-machine parity, what can't be tested locally
+- `mem:project/machine_access` — how the Mac reaches/operates/deploys to the boxes (anonymized; creds in `.env`)
 - `mem:memory_maintenance` — how to maintain this graph

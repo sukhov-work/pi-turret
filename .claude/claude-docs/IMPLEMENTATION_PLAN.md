@@ -37,7 +37,7 @@ Pipelined, not serial. One process, threads sharing **lock-protected single-slot
 
 **Module layout (suggested; refine in place):**
 ```
-pi-turret-v2/
+<repo-root>/            # v2 lives at the repo ROOT (not a subdir); v1 stays quarantined under v1/
   config.py            # dataclass config, loaded from config.yaml; all tunables live here
   capture.py           # Camera abstraction: PiCamCapture (detection), UsbCapture (stream/spotter)
   detect/
@@ -73,7 +73,7 @@ pi-turret-v2/
 
 | # | Step | Goal | Files | Machine | Validation | Rollback |
 |---|---|---|---|---|---|---|
-| 0.1 | v2 tree + venv | Isolated v2; v1 untouched | new `pi-turret-v2/`, venv | Mac + Pi | v1 still runs (`cd v1 && python3 main.py`); v2 venv imports picamera2, tflite-runtime/pycoral, numpy | delete tree/venv |
+| 0.1 | v2 tree + venv | Isolated v2; v1 untouched | v2 pkgs at **repo root**, `.venv-v2` | Mac + Pi | v1 still runs (`cd v1 && python3 main.py`); v2 venv imports picamera2, tflite-runtime/pycoral, numpy | delete tree/venv |
 | 0.2 | Config skeleton | All tunables in one typed place | `config.py`, `config.yaml` | Mac | loads, validates, round-trips | n/a |
 | 0.3 | Detection contract | Freeze `Detection`/`Track` dataclasses so threads can be built in parallel | `detect/base.py`, `track/tracker.py` stubs | Mac | importable; documented fields | n/a |
 
@@ -198,7 +198,7 @@ pi-turret-v2/
 
 Authored + unit-tested on the **Mac** (`.venv-v2`, Python 3.9.6) — **146 passed / 1 skipped**.
 v1 untouched. v2 lives at the **repo root** (top-level packages; imports are `from detect import …`,
-deploy is `rsync ./ → ~/pi-turret-v2/`). Run tests: `.venv-v2/bin/python -m pytest -q`.
+deploy is **git push-to-deploy**: `git push pi|strix main` → `~/pi-turret` on each box, never rsync — reach via `ssh pi`/`ssh strix` over Tailscale, mosh+tmux for long sessions; access details in `mem:project/machine_access`, creds in `.claude/.env`). Run tests: `.venv-v2/bin/python -m pytest -q`.
 
 ### Per-step status
 | Step | Status | What finishes it (machine) |

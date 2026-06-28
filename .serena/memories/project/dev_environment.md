@@ -8,11 +8,15 @@ the model pipeline, or timing. (Referred by `mem:core`.)
 |---|---|---|
 | Mac M3 (ARM) | author + polish code, pure-logic pytest, git | none for hardware/TPU; cannot run `edgetpu_compiler` |
 | Strix Halo, Ubuntu (x86-64) | train / export / INT8-quant / `edgetpu_compiler` | the only machine that compiles Edge-TPU models |
-| Pi 4, Bullseye (`jayson@pi-jayson.local`) | deploy + on-device tests | the only source of camera/Coral/servo/FPS/aiming truth |
+| Pi 4, Bullseye | deploy + on-device tests | the only source of camera/Coral/servo/FPS/aiming truth |
 
 ## Guiding principle
 "Runs on the Mac" ≠ "verified" for anything touching the camera, Coral, servos, pump, or timing —
 those are Pi-only facts. Pure logic (decode, NMS, calibration, controller, state machine) is Mac-truth.
+
+## Access & deploy
+See `mem:project/machine_access` — Tailscale SSH via `ssh pi` / `ssh strix`, mosh+tmux for long work,
+**git push-to-deploy** (`git push pi|strix main` → `~/pi-turret`, never rsync), creds only in `.claude/.env`.
 
 ## What CAN'T be tested locally (Mac)
 - `picamera2` / `libcamera` / `RPi.GPIO` / `smbus` imports (hardware-only) — mock them in tests.
@@ -22,7 +26,8 @@ those are Pi-only facts. Pure logic (decode, NMS, calibration, controller, state
 ## Practical workflow
 1. Author + unit-test logic on the Mac (hardware mocked, no import side effects).
 2. Build/export/compile models on the Strix box; the compiled file ends `_edgetpu.tflite`.
-3. `rsync` to the Pi; run on-device; record measured numbers; bench servos dry before any live fire.
+3. **git push** code to the box (push-to-deploy), run on-device, record measured numbers; bench servos
+   dry before any live fire. Move large artifacts (models/images) with rsync, not git.
 
 ## Parity tips
 - Keep on-device code Python-3.9-clean (no `match`, no `X | Y` unions).

@@ -32,7 +32,7 @@ never editing v1 in place. Hardware is fixed; Debian 11 Bullseye + Python 3.9 is
 |---|---|---|
 | **Mac M3** (ARM) | author + polish code, run pure-logic `pytest`, git | none for hardware/TPU; **can't** run `edgetpu_compiler` |
 | **Strix Halo, Ubuntu 25** (x86-64) | train / export / INT8-quant / `edgetpu_compiler` | the **only** machine that compiles Edge-TPU models |
-| **Pi 4, Bullseye** (`jayson@pi-jayson.local`) | deploy + on-device tests | the **only** source of camera, Coral, servo, FPS, aiming truth |
+| **Pi 4, Bullseye** (reach via `ssh pi`) | deploy + on-device tests | the **only** source of camera, Coral, servo, FPS, aiming truth |
 
 "Runs on the Mac" ≠ "verified" for anything touching the camera, Coral, servos, pump, or timing.
 
@@ -55,11 +55,12 @@ cd v1 && python3 main.py             # Bottle UI on :8001
 # Tests (pure logic: decode, NMS, calibration, controller, state machine) — on the Mac
 python -m pytest tests/ -v
 
-# Deploy v2 to the Pi
-rsync -av --exclude .git ./ jayson@pi-jayson.local:~/pi-turret-v2/
-ssh jayson@pi-jayson.local
+# Deploy (Mac = source of truth): git push-to-deploy to ~/pi-turret on each box (NOT rsync)
+git push pi main      # Pi    — push-to-checkout into ~/pi-turret (reach: ssh pi)
+git push strix main   # Strix — push-to-checkout into ~/pi-turret (reach: ssh strix)
+# hosts/users/key/passwords in .claude/.env (gitignored — never commit). rsync/scp = big artifacts only.
 
-# Model build/export — on the Strix Halo box ONLY (verify current Ultralytics flags first)
+# Model build/export — on the Strix Halo box ONLY, via `ssh strix` (verify current Ultralytics flags first)
 yolo export model=best.pt format=edgetpu imgsz=256 int8=True data=bird.yaml nms=False
 ```
 The v2 venv/layout and exact test runner are set in Phase 0 of the plan — confirm before assuming.

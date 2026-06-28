@@ -6,8 +6,8 @@ re-read files before trusting specifics. (Related: `mem:core`, `mem:tech_stack`.
 ## Layout & tooling
 - **v2 lives at the REPO ROOT**, not a subdir. Top-level packages: `detect/ track/ strategy/
   aim/ actuate/ app/`, plus `config.py contracts.py errors.py capture.py main.py`. Chosen
-  because the conventions import as `from detect import …`/`from config import …` and the
-  deploy is `rsync ./ → ~/pi-turret-v2/`. v1 stays quarantined in `v1/` (untouched).
+  because the conventions import as `from detect import …`/`from config import …`; it deploys via
+  **`git push pi|strix main`** (push-to-checkout) to `~/pi-turret` on each box. v1 stays quarantined in `v1/` (untouched).
 - Mac test venv: **`.venv-v2`** (Python 3.9.6 — Pi parity). Run: `.venv-v2/bin/python -m pytest -q`.
   `pytest.ini` sets `pythonpath = .`; deps numpy + PyYAML + pytest (`requirements-v2.txt`).
 - Test count at scaffold time: **129 passed, 1 skipped** (the skipped one is the real-model

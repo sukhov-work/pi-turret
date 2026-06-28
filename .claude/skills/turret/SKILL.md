@@ -46,10 +46,35 @@ If these files live elsewhere, locate them with Glob before assuming they are mi
 |---|---|---|
 | **Mac M3** (ARM) | Author + polish code, run pure-logic unit tests, git | No camera/TPU/servo truth. Cannot run `edgetpu_compiler` (ARM). |
 | **Strix Halo, Ubuntu 25** (x86-64) | Train / finetune / export / INT8-quantize / `edgetpu_compiler` | The **only** place the Edge-TPU compiler runs. Do all model builds here, native or Docker. |
-| **Raspberry Pi 4**, Bullseye, `jayson@pi-jayson.local` | Deploy + on-device tests | The **only** source of hardware, inference, FPS/latency, and aiming truth. Confirm the host before pushing. |
+| **Raspberry Pi 4**, Bullseye, reach via `ssh pi` | Deploy + on-device tests | The **only** source of hardware, inference, FPS/latency, and aiming truth. Confirm the host before pushing. |
 
 "Runs on the Mac" never means "verified" for anything involving the camera, the Coral, servos,
 the pump, or real timing. Those are Pi-only facts.
+
+### Network & sessions (reach + operate the boxes)
+
+All hosts/users/key/working-dirs/passwords live in `.claude/.env` (gitignored — **never commit or
+share**; prefer key auth, never put a password in argv/logs). Reach both boxes over **Tailscale** from
+the Mac:
+
+| Box | Connect | Repo (push target) |
+|---|---|---|
+| Pi 4 | `ssh pi` | `~/pi-turret` |
+| Strix Halo | `ssh strix` | `~/pi-turret` |
+
+- **Aliases** in `~/.ssh/config` supply the dedicated Tailscale key automatically (no `-i`); `github.com` keeps using
+  `id_ed25519`. Explicit form: `ssh -i $MAC_SSH_KEY_LOCALTION <user>@<host>`.
+- **One-shot commands → plain `ssh`** (scriptable, captures output). **Interactive / long work →
+  `mosh` + `tmux`** (survives drops): `mosh pi`, then `tmux new -A -s turret`.
+- **Long builds (export / `edgetpu_compiler` / training) → detached tmux on the box** so they outlive
+  the SSH session: `ssh strix 'tmux new -A -d -s build "<cmd>"'`; reattach `ssh strix -t tmux attach -t build`.
+- **Deploy = git push-to-deploy, NOT rsync.** Mac is source of truth; each box is a non-bare repo with
+  `receive.denyCurrentBranch=updateInstead`. Ship code with `git push pi main` / `git push strix main`
+  (`.env` is gitignored, so a push never leaks secrets). **rsync/scp only for big artifacts** (test
+  models, images, datasets, the compiled `_edgetpu.tflite`) — pull results back, then commit on the Mac.
+- **Strix is shared/critical:** never upgrade its OS or do global/destructive system or Python package
+  changes — **confirm with the owner first**; venvs are fine. (`edgetpu_compiler` is not yet installed
+  there — set it up in a venv/Docker before the compile phase.)
 
 ## Investigation discipline (every phase)
 
@@ -215,8 +240,9 @@ if a constraint or workflow changed.
 | Read / navigate code | `Read`, `Grep`, `Glob` | — |
 | Edit code | `Edit` | `Write` (new files only) |
 | Shell (git, pytest, build) | `Bash` | — |
-| Push to Pi / run on-device | `Bash` → `ssh`/`rsync jayson@pi-jayson.local` | scp |
-| Model build/export/compile | `Bash` on the Strix Halo box (document the command) | Docker |
+| Reach a box / run on-device | `Bash` → `ssh pi` / `ssh strix` (mosh+tmux for long jobs) | `-i $MAC_SSH_KEY_LOCALTION` |
+| Deploy code to a box | `Bash` → `git push pi main` / `git push strix main` (push-to-checkout) | rsync **artifacts only** |
+| Model build/export/compile | `Bash` on `ssh strix` (document the command; run in tmux) | Docker |
 | Current library/version facts | `WebSearch` | parallel research subagents |
 
 ## Anti-patterns

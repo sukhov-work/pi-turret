@@ -16,7 +16,7 @@ Project consists of following parts:
 The v1 implementation lives under `v1/`. Run it from inside that folder:
 ``` cd v1 && python3 main.py ```
 
-This will start Bottle WSGI server that will be exposed locally by current raspberry IP address on port 8001, eg: `http://192.168.68.145:8001/`  or by current host name, eg `http://pi-jayson.local:8001/` 
+This will start Bottle WSGI server that will be exposed locally by current raspberry IP address on port 8001, eg: `http://192.168.68.145:8001/`  or by current host name, eg `http://<raspberry-host>.local:8001/` 
 On the browser page the turret state and live stream through wecam is available. The autodetection is disabled by default and can be enabled via UI button. Servo controls are available only when autodetection is OFF
 
 <img width="697" alt="Screenshot 2023-10-19 at 12 47 36" src="https://github.com/sukhov-work/pi-turret/assets/58325577/bdfc3588-f104-43b9-99ce-b6a46d39eacf">
@@ -75,12 +75,15 @@ aim/ actuate/ app/` + `tests/`. Imports are top-level (`from detect import …`)
 python3 -m venv .venv-v2 && .venv-v2/bin/pip install -r requirements-v2.txt
 .venv-v2/bin/python -m pytest -q
 
-# deploy + run on the Pi
-rsync -av --exclude .git --exclude .venv-v2 ./ jayson@pi-jayson.local:~/pi-turret-v2/
-ssh jayson@pi-jayson.local 'cd ~/pi-turret-v2 && python3 main.py'
+# deploy to a box (Mac = source of truth): git push-to-deploy, NOT rsync
+git push pi main      # checks the repo out into ~/pi-turret on the Pi
+ssh pi 'cd ~/pi-turret && python3 main.py'
 ```
-Fire is **disabled by default** (`fire.enabled: false` in `config.yaml`) — "would-fire" telemetry only,
-for safe bring-up. All tunables live in `config.py` / `config.yaml`.
+The Pi/Strix boxes are reached over Tailscale via `ssh pi` / `ssh strix` (keys/hosts in `.claude/.env`,
+gitignored); each box is a non-bare git repo that checks out on push (`receive.denyCurrentBranch=updateInstead`).
+Prefer `mosh` + `tmux` for long sessions; rsync/scp is for large artifacts only (models, datasets). Fire is
+**disabled by default** (`fire.enabled: false` in `config.yaml`) — "would-fire" telemetry only, for safe
+bring-up. All tunables live in `config.py` / `config.yaml`.
 
 ### Wiring (FIXED — reused from v1, do NOT rewire; escalate first)
 | Function | Bus / pin |

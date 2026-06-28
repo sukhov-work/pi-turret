@@ -126,7 +126,7 @@ mjpg-streamer with the custom `input_opencv.so` plugin (built because `input_ras
 - **Does v2 still need the custom OpenCV? Largely no.** NCNN (via Ultralytics), pycoral/tflite-runtime, and picamera2 do **not** require OpenCV for inference. OpenCV was used for cv2.dnn (being dropped), resize/letterbox (replaced by picamera2 lores sizing + numpy), and box drawing (replaceable by numpy/PIL or picamera2 overlays).
 - **If any OpenCV op is still wanted**, install a standard **piwheels** wheel (`pip install opencv-python-headless`) on Bullseye/aarch64 instead of the source build — headless avoids GUI deps and retires the Xenial-libjasper hack, the single most fragile component.
 
-**Phased, non-destructive migration plan (build v2 in a separate `pi-turret-v2/` venv; leave v1 intact):**
+**Phased, non-destructive migration plan (v2 built at the repo root in its own `.venv-v2`; v1 left intact under `v1/`):**
 
 | Phase | Goal | Validation criteria | Rollback |
 |---|---|---|---|
