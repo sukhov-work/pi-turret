@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PI-TURRET // FCS</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg:#080b09; --panel:#0d1210; --panel2:#0a0e0c; --line:#1b271f;
+    --dim:#5f7568; --txt:#a9c0b0; --bright:#dfeee4;
+    --grn:#3fbf6f; --grn-dim:#2c7a4c; --amb:#d6a626; --red:#e0492f; --cyan:#36a9b8;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--txt); font-family:var(--mono);
+         font-size:13px; -webkit-font-smoothing:none; }
+  .up { text-transform:uppercase; letter-spacing:.12em; }
+
+  /* ---- header / status strip ---- */
+  header { display:flex; align-items:center; gap:18px; padding:8px 16px;
+           background:linear-gradient(180deg,#0e1411,#0a0e0c);
+           border-bottom:1px solid var(--line); }
+  header::before { content:""; position:absolute; left:0; right:0; top:0; height:2px;
+                   background:linear-gradient(90deg,var(--grn),transparent 60%); opacity:.5; }
+  header { position:relative; }
+  .brand { font-weight:700; letter-spacing:.18em; color:var(--bright); }
+  .brand small { color:var(--grn); font-weight:400; }
+  .stat { display:flex; flex-direction:column; line-height:1.15; }
+  .stat .lbl { font-size:9.5px; color:var(--dim); }
+  .stat .val { font-size:14px; color:var(--bright); font-weight:600; }
+  .spacer { margin-left:auto; }
+  .tag { padding:3px 9px; border:1px solid var(--line); font-size:11px;
+         color:var(--dim); background:var(--panel2); }
+  .tag.on  { color:var(--grn); border-color:var(--grn-dim); box-shadow:0 0 8px #1d6b3a55; }
+  .tag.warn{ color:var(--amb); border-color:#6b591a; }
+  .tag.hot { color:var(--red); border-color:#7a2a1c; box-shadow:0 0 10px #e0492f55; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+  .pulse { animation:pulse 0.7s steps(2,end) infinite; }
+
+  main { display:grid; grid-template-columns:240px 1fr 320px; gap:12px; padding:12px; align-items:start; }
+  @media (max-width:1100px){ main{ grid-template-columns:1fr; } }
+
+  .card { background:var(--panel); border:1px solid var(--line); padding:10px 11px; margin-bottom:12px; position:relative; }
+  .card > h2 { margin:0 0 9px; font-size:10.5px; color:var(--grn);
+               display:flex; align-items:center; gap:6px; }
+  .card > h2::before { content:"//"; color:var(--grn-dim); }
+  .card > h2 .r { margin-left:auto; color:var(--dim); font-weight:400; }
+
+  button { font:inherit; font-size:12px; background:var(--panel2); color:var(--txt);
+           border:1px solid var(--line); padding:7px 10px; cursor:pointer; letter-spacing:.06em; }
+  button:hover { border-color:var(--grn-dim); color:var(--bright); }
+  button:active { transform:translateY(1px); }
+  button.go   { border-color:var(--grn-dim); color:var(--grn); }
+  button.go:hover { background:#10231788; }
+  button.warn { border-color:#6b591a; color:var(--amb); }
+  button.fire { border-color:#7a2a1c; color:var(--red); }
+  button.fire:hover { background:#2a100b; box-shadow:0 0 10px #e0492f44; }
+  button[disabled]{ opacity:.3; cursor:not-allowed; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:7px; }
+  .grid1 { display:grid; gap:7px; }
+
+  /* jog pad */
+  #pad { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; }
+  #pad button { padding:10px 0; }
+  #pad .sp { visibility:hidden; }
+  .disabled-note { font-size:10px; color:var(--dim); }
+
+  /* telemetry readout */
+  .kv { display:flex; justify-content:space-between; gap:8px; padding:3px 0; border-bottom:1px dashed #16201a; }
+  .kv:last-child{ border-bottom:0; }
+  .kv span { color:var(--dim); }
+  .kv b { color:var(--bright); font-weight:600; }
+  .kv b.acc{ color:var(--grn); } .kv b.amb{ color:var(--amb); } .kv b.red{ color:var(--red); }
+
+  table { width:100%; border-collapse:collapse; font-size:11.5px; }
+  th { text-align:left; color:var(--dim); font-weight:500; padding:3px 5px; border-bottom:1px solid var(--line); }
+  td { padding:3px 5px; border-bottom:1px solid #11190f; }
+  tr.sel td { color:var(--grn); }
+
+  /* tactical canvas */
+  .tac-wrap { position:relative; aspect-ratio:1/1; width:100%; background:var(--panel2);
+              border:1px solid var(--line); }
+  #tactical { width:100%; height:100%; display:block; }
+  .tac-cap { position:absolute; top:6px; left:8px; font-size:9.5px; color:var(--dim); letter-spacing:.1em; }
+  .tac-cap.r { left:auto; right:8px; }
+
+  #vis { width:100%; display:block; border:1px solid var(--line); background:var(--panel2); min-height:60px; }
+  .vis-off { padding:18px; text-align:center; color:var(--dim); font-size:11px; border:1px dashed var(--line); }
+
+  details { border-top:1px solid var(--line); margin-top:6px; }
+  summary { cursor:pointer; color:var(--dim); padding:6px 0 4px; font-size:10.5px; }
+  summary:hover{ color:var(--txt); }
+  .tune label { display:flex; justify-content:space-between; align-items:center; gap:8px; font-size:11px; margin:3px 0; color:var(--dim); }
+  .tune input { background:var(--bg); color:var(--bright); border:1px solid var(--line); padding:3px 6px; width:120px; font:inherit; }
+  .tune input:focus{ outline:none; border-color:var(--grn-dim); }
+
+  #log { font-size:10.5px; color:var(--dim); min-height:14px; }
+  #conn { font-size:10px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">PI&#8209;TURRET <small>// FCS</small></div>
+  <div class="stat"><span class="lbl up">state</span><span class="val" id="state">----</span></div>
+  <div class="stat"><span class="lbl up">tracks</span><span class="val" id="ntrk">0</span></div>
+  <div class="stat"><span class="lbl up">rate</span><span class="val" id="fps">--</span></div>
+  <div class="stat"><span class="lbl up">shots</span><span class="val" id="shots">0</span></div>
+  <div class="spacer"></div>
+  <span class="tag up" id="sys">sys safe</span>
+  <span class="tag up" id="fire">fire safe</span>
+  <span class="tag up" id="conn">link --</span>
+</header>
+
+<main>
+  <!-- LEFT: fire control + manual + stream -->
+  <div>
+    <div class="card">
+      <h2 class="up">Fire Control</h2>
+      <div class="grid2">
+        <button class="go"   onclick="cmd('arm')">Arm</button>
+        <button class="warn" onclick="cmd('disarm')">Disarm</button>
+        <button class="fire" onclick="cmd('enable_fire')">Fire&nbsp;Live</button>
+        <button         onclick="cmd('disable_fire')">Fire&nbsp;Safe</button>
+        <button onclick="cmd('center')">Center</button>
+        <button onclick="cmd('toggle_fire')">Toggle</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 class="up">Manual Slew <span class="r" id="jogstate">locked</span></h2>
+      <div id="pad">
+        <span class="sp"></span><button data-jog onclick="jog('up')">&#9650;</button><span class="sp"></span>
+        <button data-jog onclick="jog('left')">&#9664;</button>
+        <button data-jog onclick="jog('stop')">&#9632;</button>
+        <button data-jog onclick="jog('right')">&#9654;</button>
+        <span class="sp"></span><button data-jog onclick="jog('down')">&#9660;</button><span class="sp"></span>
+      </div>
+      <div class="disabled-note" id="jognote">Disarm to enable manual slew.</div>
+    </div>
+
+    <div class="card">
+      <h2 class="up">Optics / Stream <span class="r" id="streamstat">usb</span></h2>
+      <div class="grid2">
+        <button class="go" onclick="streamCmd('stream_usb')">Feed&nbsp;On</button>
+        <button class="warn" onclick="streamCmd('stream_off')">Feed&nbsp;Off</button>
+      </div>
+      <div class="grid2" style="margin-top:7px">
+        <button onclick="cmd('enable_aux')">Marker&nbsp;On</button>
+        <button onclick="cmd('disable_aux')">Marker&nbsp;Off</button>
+      </div>
+    </div>
+
+    <div class="card"><div id="log">system idle</div></div>
+  </div>
+
+  <!-- CENTER: tactical display + visual feed -->
+  <div>
+    <div class="card">
+      <h2 class="up">Tactical &mdash; Detection Frame</h2>
+      <div class="tac-wrap">
+        <canvas id="tactical" width="600" height="600"></canvas>
+        <span class="tac-cap up">DET-CAM</span>
+        <span class="tac-cap r up" id="kzcap">KZ</span>
+      </div>
+    </div>
+    <div class="card">
+      <h2 class="up">Visual &mdash; USB Feed</h2>
+      <img id="vis" alt="" style="display:none">
+      <div class="vis-off" id="visoff">FEED OFFLINE &mdash; press FEED ON</div>
+    </div>
+  </div>
+
+  <!-- RIGHT: telemetry + tracks + tuning -->
+  <div>
+    <div class="card">
+      <h2 class="up">Telemetry</h2>
+      <div id="telemetry"></div>
+    </div>
+    <div class="card">
+      <h2 class="up">Track Table</h2>
+      <table><thead><tr><th>ID</th><th>X</th><th>Y</th><th>SCR</th><th>VX</th><th>VY</th><th>HIT</th></tr></thead>
+        <tbody id="tracks"></tbody></table>
+    </div>
+    <div class="card tune">
+      <h2 class="up">Parameters <span class="r">live</span></h2>
+      <div id="tune"></div>
+    </div>
+  </div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const STATE_CLASS = { safe:"", searching:"on", tracking:"on", aiming:"warn", firing:"hot", cooldown:"warn" };
+let SNAP = {}, lastOk = 0;
+
+function log(t, ok){ const e=$("log"); e.textContent=t; e.style.color = ok===false ? "var(--red)" : "var(--dim)"; }
+
+async function post(path, body, isJson){
+  const o={method:"POST"};
+  if(isJson){ o.headers={"Content-Type":"application/json"}; o.body=JSON.stringify(body); } else { o.body=body; }
+  const r=await fetch(path,o); let d={}; try{ d=await r.json(); }catch(e){}
+  return d;
+}
+async function cmd(c){ const d=await post("/api/cmd",c,false); log(d.error||("CMD "+c.toUpperCase()), d.ok); pollNow(); }
+async function jog(c){ const d=await post("/api/control-cmd",c,false); log(d.error||("SLEW "+c.toUpperCase()+(d.angle_deg!=null?" -> "+d.angle_deg+"°":"")), d.ok); }
+async function streamCmd(c){ const d=await post("/api/cmd",c,false); log(d.error||("FEED "+c.toUpperCase()), d.ok); pollNow(); }
+
+function setTag(el, on, txt, kind){ el.textContent=txt; el.className="tag up"+(on?(" "+(kind||"on")):""); }
+function fmt(v,u){ return v==null ? "--" : (typeof v==="number" ? (Math.round(v*100)/100)+(u||"") : v); }
+
+function drawTactical(t){
+  const c=$("tactical"), ctx=c.getContext("2d"), W=c.width, H=c.height;
+  const fw=(t.frame&&t.frame.w)||1152, fh=(t.frame&&t.frame.h)||1152;
+  const sx=W/fw, sy=H/fh;
+  ctx.clearRect(0,0,W,H); ctx.fillStyle="#0a0e0c"; ctx.fillRect(0,0,W,H);
+  // grid
+  ctx.strokeStyle="#111a14"; ctx.lineWidth=1;
+  for(let i=1;i<8;i++){ const x=W*i/8, y=H*i/8;
+    ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
+  // center reticle
+  ctx.strokeStyle="#1d2c22"; ctx.beginPath(); ctx.moveTo(W/2,0); ctx.lineTo(W/2,H);
+  ctx.moveTo(0,H/2); ctx.lineTo(W,H/2); ctx.stroke();
+  // kill zone
+  const kz=t.killzone;
+  if(kz){
+    const hot=t.would_fire;
+    ctx.strokeStyle=hot?"#e0492f":"#d6a626"; ctx.lineWidth=1.5; ctx.setLineDash([6,4]);
+    if(kz.shape==="circle"){ ctx.beginPath(); ctx.arc(kz.cx_px*sx,kz.cy_px*sy,kz.radius_px*sx,0,7); ctx.stroke(); }
+    else { ctx.strokeRect((kz.cx_px-kz.half_w_px)*sx,(kz.cy_px-kz.half_h_px)*sy,2*kz.half_w_px*sx,2*kz.half_h_px*sy); }
+    ctx.setLineDash([]);
+    if(hot){ ctx.fillStyle="#e0492f22"; ctx.fillRect((kz.cx_px-kz.half_w_px)*sx,(kz.cy_px-kz.half_h_px)*sy,2*kz.half_w_px*sx,2*kz.half_h_px*sy); }
+  }
+  // tracks
+  const sel=t.selected_target_id;
+  (t.tracks||[]).forEach(tr=>{
+    const x=tr.cx*sx, y=tr.cy*sy, isSel=(tr.id===sel);
+    ctx.strokeStyle=isSel?"#3fbf6f":"#2c7a4c"; ctx.lineWidth=isSel?2:1;
+    const r=isSel?11:7; ctx.strokeRect(x-r,y-r,2*r,2*r);
+    if(isSel){ ctx.strokeStyle="#3fbf6f55"; ctx.beginPath(); ctx.arc(x,y,r+6,0,7); ctx.stroke(); }
+    ctx.fillStyle=isSel?"#dfeee4":"#5f7568"; ctx.font="10px ui-monospace, monospace";
+    ctx.fillText("#"+tr.id, x+r+3, y-r);
+    // velocity vector
+    if(tr.vx||tr.vy){ ctx.strokeStyle="#36a9b8"; ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x+tr.vx*sx*6,y+tr.vy*sy*6); ctx.stroke(); }
+  });
+  // predicted lead
+  const p=t.predicted_xy;
+  if(p && p[0]!=null && p[1]!=null){
+    const x=p[0]*sx, y=p[1]*sy; ctx.strokeStyle="#36a9b8"; ctx.lineWidth=1.5;
+    ctx.beginPath(); ctx.moveTo(x-7,y-7); ctx.lineTo(x+7,y+7); ctx.moveTo(x+7,y-7); ctx.lineTo(x-7,y+7); ctx.stroke();
+  }
+}
+
+function renderTune(){
+  const order=["fire","strategy","killzone","predict","controller","aim","tracker","stream","app"];
+  $("tune").innerHTML = order.filter(s=>SNAP[s]).map(sec=>{
+    const body=Object.entries(SNAP[sec]).map(([k,v])=>{
+      const id=`f_${sec}_${k}`;
+      let inp;
+      if(typeof v==="boolean") inp=`<input type="checkbox" id="${id}" ${v?"checked":""}>`;
+      else if(Array.isArray(v)) inp=`<input type="text" id="${id}" value="${v.join(", ")}">`;
+      else if(typeof v==="number") inp=`<input type="number" step="any" id="${id}" value="${v}">`;
+      else inp=`<input type="text" id="${id}" value="${v}">`;
+      return `<label><span>${k}</span>${inp}</label>`;
+    }).join("");
+    return `<details><summary>${sec.toUpperCase()}</summary>${body}<button onclick="applySection('${sec}')">Apply ${sec}</button></details>`;
+  }).join("");
+}
+function readField(sec,k,orig){
+  const el=$(`f_${sec}_${k}`);
+  if(typeof orig==="boolean") return el.checked;
+  if(Array.isArray(orig)) return el.value.split(",").map(s=>parseFloat(s.trim()));
+  if(typeof orig==="number") return parseFloat(el.value);
+  return el.value;
+}
+async function applySection(sec){
+  const changes={}; for(const [k,v] of Object.entries(SNAP[sec])) changes[k]=readField(sec,k,v);
+  const d=await post("/api/config",{section:sec,changes},true);
+  if(d.ok){ SNAP[sec]=d.values; log("APPLIED "+sec.toUpperCase()); } else log(d.error||"PARAM ERR", false);
+}
+async function loadConfig(){ try{ SNAP=await (await fetch("/api/config")).json(); renderTune(); }catch(e){} }
+
+function updateStream(s){
+  if(!s) return;
+  $("streamstat").textContent=`${s.source}${s.running?" · live":" · off"}`;
+  const img=$("vis"), off=$("visoff");
+  if(s.running && s.source==="usb"){
+    const url=`${location.protocol}//${location.hostname}:${s.port}/?action=stream`;
+    if(img.style.display==="none"){ img.src=url; img.style.display="block"; off.style.display="none"; }
+  } else { img.style.display="none"; img.removeAttribute("src"); off.style.display="block"; }
+}
+
+async function pollTelemetry(){
+  let t;
+  try{ t=await (await fetch("/api/telemetry")).json(); lastOk=Date.now(); }
+  catch(e){ setTag($("conn"),false,"LINK LOST","hot"); return; }
+  const st=(t.state||"----");
+  $("state").textContent=st.toUpperCase();
+  $("state").style.color = st==="firing"?"var(--red)":st==="aiming"?"var(--amb)":t.armed?"var(--grn)":"var(--bright)";
+  $("ntrk").textContent = t.num_tracks!=null?t.num_tracks:(t.tracks?t.tracks.length:0);
+  $("fps").textContent = fmt(t.fps);
+  $("shots").textContent = t.shots!=null?t.shots:0;
+  setTag($("sys"), t.armed, t.armed?"sys armed":"sys safe", "on");
+  setTag($("fire"), t.fire_enabled, t.fire_enabled?"fire live":"fire safe", "hot");
+  $("fire").classList.toggle("pulse", st==="firing");
+  setTag($("conn"), true, "link up", "on");
+
+  // jog availability
+  const locked=t.armed;
+  document.querySelectorAll("[data-jog]").forEach(b=>b.disabled=locked);
+  $("jogstate").textContent=locked?"locked":"ready";
+  $("jognote").style.display=locked?"block":"none";
+
+  // telemetry readout
+  const kz = t.in_killzone;
+  const rows=[
+    ["target", t.selected_target_id!=null?("#"+t.selected_target_id):"--", "acc"],
+    ["aim err", fmt(t.aim_error_px,"px"), t.aim_error_px!=null&&t.aim_error_px<15?"acc":"amb"],
+    ["in kill-zone", kz?"YES":"no", kz?"acc":""],
+    ["would fire", t.would_fire?"ARMED":"hold", t.would_fire?"red":""],
+    ["pan", fmt(t.pan_cmd_deg,"°")],
+    ["tilt", fmt(t.tilt_cmd_deg,"°")],
+    ["lead xy", t.predicted_xy?`${fmt(t.predicted_xy[0])}, ${fmt(t.predicted_xy[1])}`:"--"],
+  ];
+  $("telemetry").innerHTML=rows.map(([k,v,c])=>`<div class="kv"><span>${k}</span><b class="${c||""}">${v}</b></div>`).join("");
+  $("kzcap").textContent = kz?"KZ · LOCK":"KZ";
+
+  // tracks
+  const sel=t.selected_target_id;
+  $("tracks").innerHTML=(t.tracks||[]).map(tr=>
+    `<tr class="${tr.id===sel?"sel":""}"><td>#${tr.id}</td><td>${tr.cx}</td><td>${tr.cy}</td><td>${tr.score}</td><td>${tr.vx}</td><td>${tr.vy}</td><td>${tr.hits}</td></tr>`
+  ).join("") || `<tr><td colspan="7" style="color:var(--dim)">no contacts</td></tr>`;
+
+  updateStream(t.stream);
+  drawTactical(t);
+}
+
+function pollNow(){ pollTelemetry(); }
+loadConfig();
+pollTelemetry();
+setInterval(pollTelemetry, 300);
+setInterval(()=>{ if(Date.now()-lastOk>1500) setTag($("conn"),false,"link lost","hot"); }, 1000);
+</script>
+</body>
+</html>
