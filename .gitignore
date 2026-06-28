@@ -8,3 +8,4 @@ last_servo_state.txt
 .pytest_cache/
 /dataset/
 
+/.claude/.env
