@@ -172,8 +172,33 @@ class RemoteConfig:
     key_tilt_down: str = "KEY_DOWN"
 
 
+@dataclass
+class StreamConfig:
+    """USB-webcam live stream via a separate mjpg-streamer process (Step 1.12).
+
+    The human-viewable stream is encoded by an external process so the Pi spends
+    **no detection compute** on rendering (the Pi-Cam detection path is never
+    streamed). Defaults point ``plugin_dir`` at v1's experimental build (the
+    rollback) where ``input_uvc.so`` + ``output_http.so`` live; the ``mjpg_streamer``
+    binary is expected on PATH or as an absolute ``binary``. Flags are Pi-truth —
+    verify the device/resolution/fps the actual webcam supports on-device.
+    """
+    enabled: bool = True
+    device: str = "/dev/video0"             # USB webcam (NOT the Pi Cam)
+    width_px: int = 640
+    height_px: int = 480
+    fps: int = 15
+    port: int = 8080                        # http stream port (separate from web_port)
+    binary: str = "mjpg_streamer"           # on PATH, or an absolute path
+    plugin_dir: str = "v1/mjpg-streamer/mjpg-streamer-experimental"  # .so search dir (rollback reuse)
+    input_plugin: str = "input_uvc.so"      # UVC hardware-MJPEG passthrough (low CPU)
+    output_plugin: str = "output_http.so"
+    www_dir: str = ""                        # optional -w web root (empty -> stream only)
+
+
 _SECTIONS = {
     "camera": CameraConfig,
+    "stream": StreamConfig,
     "detector": DetectorConfig,
     "tracker": TrackerConfig,
     "predict": PredictConfig,
@@ -192,6 +217,7 @@ _SECTIONS = {
 @dataclass
 class Config:
     camera: CameraConfig = field(default_factory=CameraConfig)
+    stream: StreamConfig = field(default_factory=StreamConfig)
     detector: DetectorConfig = field(default_factory=DetectorConfig)
     tracker: TrackerConfig = field(default_factory=TrackerConfig)
     predict: PredictConfig = field(default_factory=PredictConfig)
@@ -240,6 +266,13 @@ class Config:
             raise ConfigError("fire timings invalid")
         if len(self.aim.pan_coeffs) != 3 or len(self.aim.tilt_coeffs) != 3:
             raise ConfigError("aim coeffs must each be length 3 (a, b, c)")
+        st = self.stream
+        if st.port <= 0:
+            raise ConfigError("stream.port must be positive")
+        if st.fps <= 0:
+            raise ConfigError("stream.fps must be positive")
+        if st.width_px <= 0 or st.height_px <= 0:
+            raise ConfigError("stream width/height must be positive")
 
 
 def _build_section(section_cls: Any, name: str, data: Dict[str, Any]) -> Any:

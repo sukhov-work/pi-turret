@@ -57,6 +57,21 @@ class ControlLoop:
         self._aux_marker = aux_marker
         self._aux_enabled = cfg.app.aux_marker_enabled
 
+    def apply_config(self) -> None:
+        """Re-apply config that was snapshotted at construction.
+
+        Most tunables (killzone, strategy weights, predict, controller, fire) are
+        read live from ``self.cfg`` each tick, so mutating them takes effect on the
+        next tick with no action here. These few are captured once at init and need
+        an explicit refresh after a live config change (e.g. from the web UI).
+        """
+        self.cal = Calibration.from_config(self.cfg.aim)
+        self._frame_w = float(self.cfg.camera.capture_width_px)
+        self._frame_h = float(self.cfg.camera.capture_height_px)
+        self._aux_enabled = self.cfg.app.aux_marker_enabled
+        self.selector.hysteresis = self.cfg.strategy.switch_hysteresis
+        self.selector.min_dwell = self.cfg.strategy.min_target_dwell_frames
+
     def _update_indicators(self) -> None:
         state = self.sm.state
         if self._status_led is not None:

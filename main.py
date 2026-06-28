@@ -16,6 +16,7 @@ import atexit
 import logging
 import signal
 import socket
+import subprocess
 
 from actuate.indicators import GpioOutput
 from actuate.lcd import StatusLcd
@@ -27,6 +28,8 @@ from app.display import LcdReporter
 from app.pipeline import Pipeline
 from app.remote import RemoteActions, RemoteListener
 from app.statemachine import FireState, FireStateMachine
+from app.streamer import UsbStreamer
+from app.web import TurretWebController, start_web_thread
 from config import Config, load_config
 from detect.coral import CoralDetector
 from strategy.selector import TargetSelector
@@ -45,6 +48,52 @@ def _lan_ip() -> str:
         return "0.0.0.0"
     finally:
         s.close()
+
+
+def _is_tailscale_ip(ip: str) -> bool:
+    """Tailscale assigns from the 100.64.0.0/10 CGNAT range."""
+    parts = ip.split(".")
+    if len(parts) != 4 or parts[0] != "100":
+        return False
+    try:
+        return 64 <= int(parts[1]) <= 127
+    except ValueError:
+        return False
+
+
+def _ipv4_addresses() -> list:
+    """All IPv4 addresses on this host (Pi: ``hostname -I``). Best-effort."""
+    try:
+        out = subprocess.run(["hostname", "-I"], capture_output=True, text=True, timeout=2)
+        return [a for a in out.stdout.split() if a.count(".") == 3]
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _log_reachable_endpoints(web_port: int, stream_port: int) -> str:
+    """Log every URL the UI + stream are reachable on so a dynamic IP / new wifi /
+    Tailscale all 'just work'. Returns the primary LAN IP (for the LCD). The web
+    server and mjpg-streamer both bind 0.0.0.0, so all of these are live at once.
+    """
+    primary = _lan_ip()
+    seen = set()
+    endpoints = []
+    for ip in _ipv4_addresses() or [primary]:
+        if ip in seen:
+            continue
+        seen.add(ip)
+        endpoints.append(("tailscale" if _is_tailscale_ip(ip) else "lan", ip))
+    try:  # MagicDNS: reach by name regardless of which wifi/IP it got
+        hostname = socket.gethostname()
+        if hostname and hostname not in seen:
+            endpoints.append(("magicdns", hostname))
+    except Exception:  # noqa: BLE001
+        pass
+    logger.info("reachable endpoints (web + usb stream):")
+    for label, host in endpoints:
+        logger.info("  [%-9s] http://%s:%s   stream http://%s:%s/?action=stream",
+                    label, host, web_port, host, stream_port)
+    return primary
 
 
 class TurretRemoteActions(RemoteActions):
@@ -119,13 +168,13 @@ def build_pipeline(cfg: Config):
         finally:
             servo.disarm()
 
-    return pipeline, reporter, remote, disarm
+    return pipeline, reporter, remote, control, disarm
 
 
 def main() -> None:
     cfg = load_config()
     logging.basicConfig(level=getattr(logging, cfg.app.log_level, logging.INFO))
-    pipeline, reporter, remote, disarm = build_pipeline(cfg)
+    pipeline, reporter, remote, control, disarm = build_pipeline(cfg)
 
     def _handle_signal(signum, _frame):
         disarm()
@@ -135,10 +184,18 @@ def main() -> None:
     signal.signal(signal.SIGTERM, _handle_signal)
     signal.signal(signal.SIGINT, _handle_signal)
 
-    reporter.message("pi-turret v2", f"{_lan_ip()}:{cfg.app.web_port}")
+    streamer = UsbStreamer(cfg.stream)
+    atexit.register(streamer.stop)
+    if cfg.app.stream_source == "usb":
+        streamer.start()
+
+    ip = _log_reachable_endpoints(cfg.app.web_port, cfg.stream.port)
+    reporter.message("pi-turret v2", f"{ip}:{cfg.app.web_port}")
     logger.info("starting pipeline (fire.enabled=%s)", cfg.fire.enabled)
     pipeline.start()
     remote.start()
+    start_web_thread(TurretWebController(cfg, pipeline, control, streamer=streamer),
+                     host="0.0.0.0", port=cfg.app.web_port)
     signal.pause()  # threads are daemons; block the main thread until a signal
 
 

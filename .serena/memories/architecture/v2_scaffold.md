@@ -53,5 +53,20 @@ A naive 1000–2000 clamp would BREAK v1's working aim. Re-measure on the Pi bef
 
 ## Not done (need other machines) — next steps
 Strix: YOLOv8n@256 export + `edgetpu_compiler` gate + capture the golden fixture. Pi: camera
-FPS, Coral latency, calibration fit, servo dry-run, decoy fire. Still to author: web UI (1.11),
-USB streamer (1.12), motion-gating seam (1.10).
+FPS, Coral latency, calibration fit, servo dry-run, decoy fire. Still to author: motion-gating seam (1.10).
+**1.12 USB streamer DONE (Mac logic):** `app/streamer.py::UsbStreamer` = a **separate
+mjpg-streamer subprocess** (UVC passthrough → no Pi detection compute on rendering; rollback =
+v1's mjpg-streamer). Pure `build_argv()` + lifecycle (enabled/idempotent/stop/`is_running`) tested
+with an injected runner; real `Popen` is Pi-only; failures swallowed (non-critical). `StreamConfig`
+defaults `plugin_dir` to v1's experimental build (`input_uvc.so`/`output_http.so`), `:8080`. Web
+switch: `TurretWebController(streamer=)` + `stream_usb`/`stream_off` cmds + `stream{}` telemetry;
+`main.py` starts it when `app.stream_source=="usb"` + atexit-stops. Pi-UNVERIFIED: real binary
+path, webcam device/res/fps, detection-FPS-unaffected.
+**1.11 web UI DONE (Mac logic):** `app/web.py` = pure `TurretWebController` (telemetry dict
+w/ inf->None; v1-mirrored `/api/cmd`,`/api/control-cmd`,`/api/turret-state` + new
+`/api/telemetry`,`/api/config`; live tuning via **atomic whole-section Config swap** +
+`validate()` rollback + str->type coerce; manual jog **refused unless SAFE**) + a thin
+**lazy-`bottle`** adapter (`create_app`/`serve`/`start_web_thread`), so the Mac venv (no bottle)
+still imports it. `ControlLoop.apply_config()` refreshes the few init-snapshotted values (cal,
+selector hysteresis/dwell, aux-enable, frame dims); all other tunables already read live per tick.
+`app/web_ui.html` = vanilla-JS console (daemon thread, `cfg.app.web_port`=8001). UNVERIFIED on Pi.

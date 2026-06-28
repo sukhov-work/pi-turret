@@ -196,7 +196,7 @@ Pipelined, not serial. One process, threads sharing **lock-protected single-slot
 
 ## 8. Build status, wiring, and added steps (updated 2026-06-27)
 
-Authored + unit-tested on the **Mac** (`.venv-v2`, Python 3.9.6) — **146 passed / 1 skipped**.
+Authored + unit-tested on the **Mac** (`.venv-v2`, Python 3.9.6) — **176 passed / 1 skipped**.
 v1 untouched. v2 lives at the **repo root** (top-level packages; imports are `from detect import …`,
 deploy is **git push-to-deploy**: `git push pi|strix main` → `~/pi-turret` on each box, never rsync — reach via `ssh pi`/`ssh strix` over Tailscale, mosh+tmux for long sessions; access details in `mem:project/machine_access`, creds in `.claude/.env`). Run tests: `.venv-v2/bin/python -m pytest -q`.
 
@@ -214,8 +214,8 @@ deploy is **git push-to-deploy**: `git push pi|strix main` → `~/pi-turret` on 
 | 1.8 `FireStateMachine` + `killzone` + `Pump` | **DONE (Mac)** | LED-stand-in + decoy fire (Pi) |
 | 1.9 headless + `annotate`/`snapshots` | AUTHORED (partial) | measure zero render cost (Pi) |
 | 1.10 motion-gated seam | TODO | behind `app.detection_mode` flag |
-| 1.11 web UI (Bottle) | **TODO** | author + Pi |
-| 1.12 USB-webcam streamer | **TODO** | author + Pi |
+| 1.11 web UI (Bottle) | **DONE (Mac logic)** | verify routes/live-tuning on Pi (`app/web.py`, `app/web_ui.html`) |
+| 1.12 USB-webcam streamer | **DONE (Mac logic)** | verify mjpg-streamer flags/device on Pi (`app/streamer.py`) |
 | 1.13 LCD lifecycle display (`actuate/lcd.py`, `app/display.py`) | **DONE (Mac logic)** | verify on real LCD (Pi) |
 | 1.14 status LED + aux marker (`actuate/indicators.py`) | **DONE (Mac)** | verify BCM23/27 (Pi) |
 | 1.15 IR remote (`app/remote.py` seam + `RemoteConfig`) | **SEAM ONLY** | owner: confirm pin; capture keys (Pi) |
