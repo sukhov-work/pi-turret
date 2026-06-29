@@ -11,7 +11,7 @@ In scope (P1): single-class "bird" detection correctly adapted to the Coral; tra
 Explicitly deferred (later phases, but leave seams): species classification (pigeon/etc.), human-safety interlock, deterrent escalation, scheduling, dashboards.
 
 **Locked decisions (override in place if you disagree):**
-- **D1 — Detector is chosen by a compile gate, not assumed.** Primary: single-class YOLOv8n INT8 @256, correct anchor-free decode. Fallback: SSDLite-MobileDet @320 (clean Edge-TPU op-map, 9.1 ms, 32.9 mAP). Both expose the **same `Detection` output contract**, so nothing downstream depends on which won. (Research Part A: YOLO head TRANSPOSE/SOFTMAX may split to CPU and cost 1000+ ms; MobileDet maps cleanly and fits SRAM.) **2026 research update (see `plans/coral-detector-selection-research.md`):** the safer production default is to **invert** this — ship MobileDet@320 first (the only guaranteed clean single-subgraph compile) and treat single-class YOLOv8n@256 as the compile-gated upgrade; **SpaghettiNet-EdgeTPU** is the top accuracy-at-equal-latency candidate worth a bake-off.
+- **D1 — Detector chosen by a compile gate. ✅ RESOLVED 2026-06-29: single-class YOLOv8n INT8 @256 is the P1 detector** (live on the Coral). The gate passed (1 subgraph, all ops on TPU — the feared TRANSPOSE/SOFTMAX → CPU split did **not** happen on `edgetpu_compiler` v16.0 + current Ultralytics) and on-Pi latency is **16.99 ms / 59 FPS** (§9). SSDLite-MobileDet@320 stays a documented **fallback only** (same `Detection` contract) — not needed unless a future heavier model's on-Pi latency disappoints. (The earlier research bias toward a MobileDet default was overridden by our measured op-map + latency; see `plans/coral-detector-selection-research.md` for the original candidate matrix.)
 - **D2 — Firing model is trip-wire kill-zone + predictive lead**, not reactive visual servoing. Water time-of-flight (~0.3–0.6 s) + servo travel dominate the budget; you get one led shot. Tracking/scoring run full-frame; the kill-zone is only the fire gate.
 - **D3 — Detection runs on a motion-gated path is OPTIONAL in P1.** Build the detector path first (full-frame TPU each tick). Leave a clean seam for the motion-first/ROI-confirm optimization (research's top accuracy+latency win) as Step 1.10, behind a config flag, so it can be added without touching the tracker/controller.
 - **D4 — Headless by default.** No frame rendering in live mode. Annotation/streaming are opt-in and run on a separate thread that can be killed without affecting the control loop.
@@ -35,37 +35,33 @@ Pipelined, not serial. One process, threads sharing **lock-protected single-slot
 
 **State machine (control thread):** `SEARCHING -> TRACKING -> AIMING -> FIRING -> COOLDOWN -> SEARCHING`. Fire is non-blocking: pump-on, start timer, keep tracking; pump-off on expiry; COOLDOWN debounces re-fire. No `time.sleep` in the loop.
 
-**Module layout (suggested; refine in place):**
+**Module layout (as-built; v2 at the repo ROOT, v1 quarantined under `v1/`):**
 ```
-<repo-root>/            # v2 lives at the repo ROOT (not a subdir); v1 stays quarantined under v1/
-  config.py            # dataclass config, loaded from config.yaml; all tunables live here
-  capture.py           # Camera abstraction: PiCamCapture (detection), UsbCapture (stream/spotter)
+<repo-root>/
+  config.py            # nested-dataclass config + config.yaml loader; all tunables here
+  contracts.py         # Detection / Track dataclasses — the stable cross-layer contract
+  errors.py            # TurretError hierarchy (Config/Camera/Detection/Servo/Pump)
+  capture.py           # PiCamCapture (detection) + UsbCapture; lazy picamera2
   detect/
-    base.py            # Detector ABC + Detection dataclass (the output contract)
-    yolo_coral.py      # YOLOv8n INT8 Edge-TPU, correct anchor-free decode + NMS
-    mobiledet_coral.py # SSDLite-MobileDet fallback, same contract
-    decode.py          # pure-logic decode + NMS (unit-tested on Mac)
-  track/
-    tracker.py         # ByteTrack wrapper or lightweight IoU+Kalman; stable IDs
-    predict.py         # constant-velocity (later CA) lead predictor (pure logic)
-  strategy/
-    scoring.py         # per-track threat/priority score (pure logic, tunable weights)
-    selector.py        # pick + switch target; hysteresis to avoid thrash
-  aim/
-    calibrate.py       # pixel<->angle transform (fit + apply); parallax + drop offsets
-    controller.py      # P/PI pixel-error step; one-directional backlash approach
-    killzone.py        # fire-gate geometry (pure logic)
-  actuate/
-    pca9685.py         # init-once servo driver (port v1's, drop per-move MODE2 toggle)
-    pump.py            # gpiozero relay/MOSFET, non-blocking timed fire
+    base.py            # Detector ABC
+    coral.py           # CoralDetector — Edge-TPU YOLOv8 (int8 in/out) + decode_v8  [primary]
+    decode.py          # anchor-free decode_v8 + NMS + frame-clip (pure, golden-tested)
+    # mobiledet_coral.py — SSD fallback, NOT yet built (not needed; see §9)
+  track/   tracker.py (IouTracker: greedy-IoU + const-velocity)   predict.py (CV lead)
+  strategy/ scoring.py (tunable weighted score)   selector.py (hysteresis switch)
+  aim/     calibrate.py (affine pixel↔angle, fit+apply)   controller.py (P/PI step)   killzone.py
+  actuate/ pca9685.py (init-once)   servo.py (ServoController: clamp angle+pulse)   pump.py (non-blocking)
+           lcd.py (StatusLcd, fail-safe)   indicators.py (status LED + opt-in aux marker)
   app/
-    statemachine.py    # SEARCHING..COOLDOWN
-    pipeline.py        # thread wiring + latest-value buffers
-    annotate.py        # opt-in drawing; full-video | fire-frames-only | off
-    snapshots.py       # save detection crops+meta for future training
-    web.py             # Bottle: control, tuning, telemetry, debug stream switch
-  main.py              # entry; guarded by if __name__ == '__main__'
-  tests/               # pytest (Mac-runnable pure logic)
+    statemachine.py    # FireStateMachine: SEARCHING→TRACKING→AIMING→FIRING→COOLDOWN→SAFE
+    control.py         # ControlLoop.tick — THE single servo mover + fire gate
+    pipeline.py        # thread wiring + LatestSlot single-slot buffers
+    display.py         # format_lcd_lines (pure) + LcdReporter (low-rate thread)
+    annotate.py  snapshots.py  remote.py(IR seam)  streamer.py(USB mjpg)  web.py + web_ui.html (Bottle)
+  main.py              # entry, guarded; atexit/SIGTERM disarm
+  models/              # committed *_edgetpu.tflite (+ .pt) — ship via git push
+  scripts/             # pi_detector_bench.py (on-Pi benchmark)
+  tests/               # flat pytest (pure logic) + fixtures/generate_golden_fixture.py
   config.yaml
 ```
 
@@ -81,8 +77,8 @@ Pipelined, not serial. One process, threads sharing **lock-protected single-slot
 
 ## 3. Phase 1 — Steps
 
-### 1.1 Correct Coral detector + decode gate  *(the blocker — do before anything downstream)*
-- **Goal:** a single-class "bird" INT8 model running on the Edge TPU with a **correct anchor-free decode** (`[1,5,8400]` → transpose → `boxes=out[:,:4]` xywh×input → `scores=out[:,4:]` → threshold → NMS; **no objectness multiply, no YOLOv5 path**).
+### 1.1 Correct Coral detector + decode gate  *(✅ DONE + Pi-verified — superseded by §9)*
+- **Goal:** a single-class "bird" INT8 model running on the Edge TPU with a **correct anchor-free decode** (`[1,5,N]` (N=1344 @256) → transpose → `boxes=out[:,:4]` xywh → `scores=out[:,4:]` → threshold → NMS → clip; **no objectness multiply, no YOLOv5 path**; for our edgetpu export xywh are normalized → `coords_normalized=True`).
 - **Files:** `detect/decode.py`, `detect/yolo_coral.py`, `tests/test_decode.py`.
 - **Machine:** export/compile on **Strix Halo (x86-64 only)**; run on **Pi**; unit-test decode on **Mac**.
 - **The gate:** read the `edgetpu_compiler` log. If the YOLOv8n head maps to **one subgraph, ops on TPU ≫ CPU** → keep YOLOv8n. If it **splits** (TRANSPOSE/SOFTMAX to CPU, "more than one subgraph") → switch to Step 1.1b. Concretely, accept a candidate only if `edgetpu_compiler -s` reports **`Number of Edge TPU subgraphs: 1`** and **`Off-chip memory used for streaming: 0.00B`**; export YOLO with **`nms=False dynamic=False`** to map the most ops. (Candidate matrix + the recommended MobileDet-default: `plans/coral-detector-selection-research.md`.)
@@ -101,8 +97,8 @@ Pipelined, not serial. One process, threads sharing **lock-protected single-slot
 - **Validation:** sustained capture FPS measured; Y-plane greyscale path verified; no AF hunting.
 - **Rollback:** fall back to a higher-res RGB capture if lores config misbehaves.
 
-### 1.3 Tracking + IDs
-- **Goal:** stable multi-target IDs across frames. Start with Ultralytics ByteTrack if the chosen detector integrates cleanly; otherwise a lightweight IoU + Kalman tracker (works with any `Detection` source, fewer deps). Low `conf`/`track_high_thresh` to retain faint birds; tunable `track_buffer` for brief occlusion.
+### 1.3 Tracking + IDs  *(✅ built as `IouTracker`)*
+- **Goal:** stable multi-target IDs across frames. **Decided + built:** a lightweight **greedy-IoU + constant-velocity** `IouTracker` (NOT ByteTrack, NOT Kalman/scipy — zero deps, Py3.9-clean, Mac-testable); confirmed tracks coast through occlusion within `tracker.max_age_frames`. Low `conf` retains faint birds.
 - **Files:** `track/tracker.py`.
 - **Validation:** on a recorded clip, IDs stay stable through crossings/occlusions; unit-test the IoU/Kalman update on synthetic tracks.
 - **Rollback:** single-target nearest-to-center if multi-track is unstable.
@@ -187,45 +183,49 @@ Pipelined, not serial. One process, threads sharing **lock-protected single-slot
 6. USB-webcam stream + web mode/camera/strategy switching, control loop never stalled.
 7. Decoy hit-rate ≥ target on-device; v1 still runs as rollback.
 
-## 7. Open questions to resolve in place (don't block the draft)
-- Does single-class YOLOv8n @256 survive the compile gate, or is MobileDet the path? (Step 1.1.)
-- ByteTrack vs lightweight IoU+Kalman — which integrates cleaner with the chosen detector on Py3.9/Pi? (Step 1.3.)
-- Measured per-stage latency budget on this exact Pi 4 (drives whether 1.10 motion-gating is needed for P1 or deferred).
-- Real water-stream velocity/range → the lead and aim-above constants (Step 1.6).
-- Snapshot volume/retention policy (SD wear) — sample rate vs fire-only.
+## 7. Open questions
+- ✅ RESOLVED — single-class YOLOv8n@256 survives the gate (1 subgraph) **and** is fast on-Pi (59 FPS) → it's the P1 detector, not MobileDet (§9).
+- ✅ RESOLVED — tracker is a lightweight greedy-IoU + constant-velocity `IouTracker` (no ByteTrack, no Kalman, no scipy; Py3.9-clean, Mac-testable). (Step 1.3.)
+- ⏳ PARTIAL — detector latency measured (17 ms); the rest of the per-stage budget (capture, servo travel, end-to-end FPS) still needs the Pi (drives whether 1.10 motion-gating is needed for P1).
+- ⏳ OPEN — real water-stream velocity/range → the lead and aim-above constants (Step 1.6, Pi rig).
+- ⏳ OPEN — snapshot volume/retention policy (SD wear) — sample rate vs fire-only.
 
 ## 8. Build status, wiring, and added steps (updated 2026-06-29)
 
-Authored + unit-tested on the **Mac** (`.venv-v2`, Python 3.9.6) — **177 passed / 1 skipped**.
+Authored + unit-tested on the **Mac** (`.venv-v2`, Python 3.9.6) — **178 passed / 0 skipped**.
 v1 untouched. v2 lives at the **repo root** (top-level packages; imports are `from detect import …`).
 Reach the boxes via `ssh pi`/`ssh strix` over Tailscale (mosh+tmux for long sessions; access in
 `mem:project/machine_access`, creds in `.claude/.env`). Run tests: `.venv-v2/bin/python -m pytest -q`.
 **Deploy = commit + push to `pi`/`strix`/`origin` — see "Deployment" below.**
 
 ### Critical path & honest status (read first)
-Most of Phase 1's **Mac-authorable** work (pure logic + UI/IO) was built **ahead of plan order**:
-tracker, predictor, scoring/selection, calibration apply, controller, kill-zone, state machine,
-pump, LCD, indicators, **web UI (1.11)**, **USB streamer (1.12)** are all DONE on the Mac (177
-tests). What was **skipped is the actual blocker** — Step 1.1's real model work (export → Edge-TPU
-compile → golden fixture → on-Pi latency), because it needs the Strix box **and a model**. The UI
-steps (1.11/1.12) and IO steps (1.13/1.14) were a **jump ahead of the detector**; harmless (they're
-contract-isolated and Pi-unverified anyway), but the detector is the true critical path now.
-➡ **Next focus = §9 "Detector Build Track".** Everything tagged "DONE (Mac logic)" awaits Pi truth, not new code.
+**The detector is DONE and Pi-verified (§9):** single-class YOLOv8n@256 on the Coral — **16.99 ms /
+59 FPS**, sane boxes, golden decode test green. All Phase-1 **Mac-authorable** work is also done
+(tracker, predictor, scoring/selection, calibration apply, controller, kill-zone, state machine,
+pump, LCD, indicators, web UI 1.11, USB streamer 1.12) — **178 tests, 0 skipped**.
+➡ **The remaining critical path is on-Pi VERIFICATION of already-authored code, not new logic:**
+camera capture/FPS (1.2), servo dry-run within clamps (1.7), LED→pump decoy fire (1.8), real LCD
+(1.13)/indicators (1.14), web + USB stream on the rig (1.11/1.12), then **end-to-end pipeline FPS +
+calibration fit + decoy hit-rate**. Plus **model iteration** on real field data — the repeatable loop
+is `claude-docs/MODEL_ITERATION.md`. Only seam still to author: motion-gating (1.10). Detail: status table below.
 
 ### Deployment (push-to-deploy + GitHub hub)
 Mac is the source of truth. Three remotes (`git remote -v`): **`pi`** and **`strix`** push-to-checkout
 into **`~/pi-turret`** on each box; **`origin`** is GitHub `sukhov-work/pi-turret`.
 
-| Push | Target | Last verified |
+| Push | Target | Notes |
 |---|---|---|
-| `git push origin main` | GitHub `sukhov-work/pi-turret` | Mac = origin/main @ `6884880` |
-| `git push strix main` | `yevhen@…:/home/yevhen/pi-turret` | Strix @ `6884880` (current) |
-| `git push pi main` | `jayson@…:/home/jayson/pi-turret` | maintained via push (Pi unreachable at last check — re-verify) |
+| `git push origin main` | GitHub `sukhov-work/pi-turret` | hub mirror |
+| `git push strix main` | `yevhen@…:/home/yevhen/pi-turret` | push-to-checkout |
+| `git push pi main` | `jayson@…:/home/jayson/pi-turret` | push-to-checkout; Pi reachability confirmed 2026-06-29 |
 
-**The boxes only get code you've COMMITTED + PUSHED.** Workflow: commit on the Mac → `git push pi main`
-&& `git push strix main` (+ `git push origin main`) → each box checks out automatically. `rsync`/`scp`
-for big artifacts only (models, datasets, golden fixtures). Reach via `ssh pi` / `ssh strix` (Tailscale;
-creds in `.claude/.env`). **Reminder:** uncommitted/unpushed Mac changes are NOT on the boxes.
+**The boxes only get code you've COMMITTED + PUSHED.** Push all three every deploy (they should stay at the
+same HEAD). `rsync`/`scp` for big artifacts only (datasets, fixtures) — **committed models in `models/` ship
+via the push**, no rsync. Reach via `ssh pi` / `ssh strix` (Tailscale; creds in `.claude/.env`).
+**Gotchas (verified 2026-06-29):** (a) if `ssh pi` times out on a stale control socket, add
+`-o ControlMaster=no -o ControlPath=none`; (b) push-to-checkout fails ("Could not update working tree") if a
+box has untracked files in the path being checked out (e.g. fixtures the generator wrote into the box's
+`tests/fixtures/`) — `rm` the identical untracked file on the box, then re-push.
 
 ### Gates before the Detector Build Track (§9) — ✅ all CLEARED 2026-06-29
 - **Strix toolchain:** DONE — `edgetpu_compiler` v16.0 + `~/turret-ml` (uv, Py 3.12, ultralytics). (§9.0)
@@ -239,7 +239,7 @@ creds in `.claude/.env`). **Reminder:** uncommitted/unpushed Mac changes are NOT
 |---|---|---|
 | 0.1–0.3 foundation (tree/venv, `config`, `contracts`) | **DONE (Mac)** | — |
 | 1.1 `decode_v8` + NMS + golden guard | **DONE + Pi-VERIFIED 2026-06-29** | golden fixture landed (coords_normalized=True); run1 on Pi: full infer **16.99 ms / 59 FPS** (TPU 12.16 ms), sane boxes ✓ |
-| 1.1b MobileDet/SSD backend | TODO | ⟶ **§9.5** `detect/mobiledet_coral.py`; research says this is the *default*, not just fallback |
+| 1.1b MobileDet/SSD backend | **NOT NEEDED (fallback)** | YOLOv8n passed the gate + is fast on-Pi; add `detect/mobiledet_coral.py` only if a future model's Pi latency disappoints |
 | 1.2 `capture.py` PiCam lores YUV420 | AUTHORED | FPS/focus truth (Pi) |
 | 1.3/1.4 `IouTracker` + lead predictor | **DONE (Mac)** | tune on a recorded Pi clip |
 | 1.5 scoring + hysteresis selector | **DONE (Mac)** | tune weights on-device |
@@ -304,22 +304,18 @@ Free pins besides BCM17: 4/5/6/12/13/16/18/19/20/21/22/24/25 + SPI block. BCM 2/
 - **Validation:** `build_key_map` unit-tested; on-Pi a key-down dispatches its action without affecting the
   control loop; remote errors are best-effort (never crash control).
 
-## 9. Detector Build Track — **NEXT (the real critical path)**
+## 9. Detector Build Track — ✅ **COMPLETE (2026-06-29)**
 
-This supersedes the terse Steps 1.1/1.1b: it is the concrete, machine-tagged sequence to get a
-**single-class "bird" detector onto the Coral**, validated and integrated. Bake off the two
-contract-compatible backends (research: `plans/coral-detector-selection-research.md`): **SSDLite-
-MobileDet@320 = safe default**, **single-class YOLOv8n@256 = gated upgrade** (its head may split to
-CPU → catastrophic on Pi 4), **SpaghettiNet-EdgeTPU = top later candidate**. Both emit the same
-`Detection` contract, so nothing downstream (tracker/strategy/aim/UI) changes when the winner flips.
+**Outcome: single-class YOLOv8n@256 INT8 is the P1 detector, live on the Coral.** Gate passed
+(1 subgraph, all ops on TPU), golden fixture landed (`coords_normalized=True`), on-Pi **16.99 ms /
+59 FPS**, sane boxes. SSDLite-MobileDet@320 stays a documented **fallback only** (same `Detection`
+contract) — not needed. The decided answers to the original open questions: deploy = git
+push-to-checkout to `~/pi-turret` on each box (active, not retired); `edgetpu_compiler` = apt global
+v16.0 on Strix; a trained bird model is already deployed (no stock-COCO first-light needed).
 
-**Decisions to make at the start of next session (recommendations in *italics*):**
-- **D-A Deploy:** standardize on the GitHub hub + one canonical dir per box? *Yes — pull all boxes to
-  `origin/main`; retire `~/pi-turret`.* (See §8 Deployment reality.)
-- **D-B First-light model:** *bring up the pipeline on stock COCO models first (YOLOv8n + a Coral-zoo
-  MobileDet, filter class 14 = bird) to de-risk compile+decode+latency before investing in a custom
-  bird model.* Then train/finetune the single-class production model.
-- **D-C edgetpu_compiler delivery:** *Docker* (Docker is already on Strix) vs a pinned host install.
+The steps below are the **as-built record + gate numbers**. The **repeatable retrain/deploy loop**
+(field data → annotate → train → export → fixture → deploy → measure) now lives in
+**`claude-docs/MODEL_ITERATION.md`** — use that for run2+, not this section.
 
 ### 9.0 GATE — Strix toolchain setup ✅ **DONE 2026-06-29**
 - **`edgetpu_compiler` v16.0** installed globally (apt, Coral repo `coral-edgetpu-stable`, signed-by
@@ -334,14 +330,14 @@ CPU → catastrophic on Pi 4), **SpaghettiNet-EdgeTPU = top later candidate**. B
 
 ### 9.1 Model sourcing ✅ **DONE 2026-06-29** — first model trained + converted
 - **run1 shipped to `models/`:** HUB run `test-8n-run-1.pt` (single-class bird) → exported on Strix →
-  `models/bird_yolov8n_256_int8_edgetpu_run1.tflite` (+ `.pt` source). Gate passed (§9.2). Not yet on Pi.
+  `models/bird_yolov8n_256_int8_edgetpu_run1.tflite` (+ `.pt` source). Gate passed (§9.2); deployed + measured on Pi (§9.4).
 - **Existing models are JUNK** (owner): everything in `v1/models/` + on the Pi is **obsolete — do not
   ship**. Going from scratch.
 - **Dataset:** owner's **Roboflow** set, **single class `['bird']`** (`jayson-x-an0sg/pigeons-single-class`):
   **1152 train / 196 val / 63 test**, YOLO-format. **Staged on Strix** at
   `~/turret-ml/datasets/pigeons-single-class/` (data.yaml fixed to absolute paths). Source on Mac:
   `~/Downloads/Pigeons Single class.yolov8`.
-- **First model:** **YOLOv8n @256, single class** → output `[1,5,8400]` (matches `decode_v8` + the golden
+- **First model:** **YOLOv8n @256, single class** → output `[1,5,1344]` (N=1344 @256; matches `decode_v8` + the golden
   test; `config.detector.num_classes=1`). **Train via Ultralytics HUB cloud** (owner's choice, GPU/fast)
   *or* locally on Strix; the **edgetpu export+compile is on Strix regardless** (compiler is x86-local).
 - **Training config (verified):** base `yolov8n`, **`imgsz=256` (NOT 640)** — deploy is locked at 256 by
@@ -368,8 +364,9 @@ CPU → catastrophic on Pi 4), **SpaghettiNet-EdgeTPU = top later candidate**. B
 - **Accept if** `edgetpu_compiler -s` reports **`Number of Edge TPU subgraphs: 1`** and off-chip
   streaming ≈0 (the strict ideal is `0.00B`; a few KiB like our 7.88 KiB is fine — the catastrophic
   case is a *split tail* sending most ops to CPU).
-- **Netron check:** int8 in/out; YOLO output `[1,4+nc,8400]` (no objectness). Compiled file **must end
-  `_edgetpu.tflite`** or the runtime silently falls back to CPU.
+- **Netron check:** int8 in/out; YOLO output `[1,4+nc,N]` (N=1344 @256; no objectness). Compiled file name
+  must contain **`_edgetpu`** (we load via pycoral `make_interpreter`, which uses the TPU regardless of the
+  exact name; run-versioned `..._edgetpu_run<N>.tflite` is fine).
 - **Go/No-Go:** reject any candidate needing 2+ subgraphs or a split tail (Pi-4 CPU fallback ≈
   1800–2100 ms vs ~22 ms mapped). **Machine:** Strix.
 
@@ -395,7 +392,7 @@ CPU → catastrophic on Pi 4), **SpaghettiNet-EdgeTPU = top later candidate**. B
 
 ### 9.5 Integrate into v2 *(same `Detection` contract — no downstream churn)*
 - **YOLO path:** `detect/coral.py` (exists) + `detect/decode.py::decode_v8` (exists). Set
-  `config.detector.model_path` (ends `_edgetpu.tflite`), `input_size_px`, `conf/iou`, `num_classes`.
+  `config.detector.model_path` (the `_edgetpu` model), `input_size_px`, `conf/iou`, `num_classes`.
 - **SSD/MobileDet path:** add **`detect/mobiledet_coral.py`** — SSD post-process reads the
   `TFLite_Detection_PostProcess` outputs (boxes / classes / scores **directly**; **no YOLO transpose,
   no `decode_v8`**), filters to bird, emits identical `Detection`. Select via `config.detector.backend`
@@ -403,14 +400,13 @@ CPU → catastrophic on Pi 4), **SpaghettiNet-EdgeTPU = top later candidate**. B
 - **Validation:** full Mac suite green; on Pi the pipeline runs with the chosen backend and switching
   `backend` needs no tracker/strategy/aim/UI change. **Machine:** Mac (author/test) + Pi (run).
 
-### 9.6 Record + choose the P1 default
-- Fill a comparison row per candidate in DECISIONS: **subgraphs · off-chip B · Pi ms · FPS · sane
-  boxes · INT8 notes**. Pick the P1 default (research bias: **MobileDet** unless YOLOv8n passes Stage 0
-  *and* is fast enough). Note the upgrade order: **SpaghettiNet-EdgeTPU → EfficientDet-Lite0 →
-  YOLOv8n@256 → YOLOv5s@320**. Update `mem:decisions/detector_build_plan` with measured numbers.
+### 9.6 Record + choose the P1 default — ✅ DONE
+- **P1 default = YOLOv8n@256** (passed Stage 0 + 59 FPS on-Pi). DECISIONS + `mem:decisions/detector_build_plan`
+  hold the measured row. Accuracy upgrades (only if needed): more/finetuned field data first
+  (`MODEL_ITERATION.md`), then a larger input (320, re-gate) or SpaghettiNet-EdgeTPU; MobileDet is the latency fallback.
 
-### Detector track exit criteria
-1. One candidate compiles to **1 subgraph / 0 B off-chip**, file ends `_edgetpu.tflite`.
+### Detector track exit criteria — ✅ all met 2026-06-29
+1. One candidate compiles to **1 subgraph / ≈0 B off-chip**, file name contains `_edgetpu`.
 2. Golden fixture committed; `test_decode` real-model test green on the Mac.
 3. Measured Pi inference ms/FPS recorded; `CoralDetector` (or MobileDet) returns sane boxes on a real frame.
 4. Backend selectable by config with zero downstream change; full Mac suite green; v1 still the rollback.

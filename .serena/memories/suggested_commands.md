@@ -7,6 +7,8 @@ Cheat-sheet. Each command notes its machine (see `mem:project/dev_environment`; 
 ```
 ssh pi          # alias (resolves via ~/.ssh/config + .claude/.env)
 ssh strix       # alias
+# if `ssh pi` TIMES OUT on a stale control socket, bypass it (verified 2026-06-29):
+ssh -o ControlMaster=no -o ControlPath=none pi '<cmd>'
 # interactive / long work — prefer mosh + tmux (survives drops):
 mosh pi ; tmux new -A -s turret
 # long builds detached so they outlive the SSH session:
@@ -20,24 +22,33 @@ cd v1 && python3 main.py        # Bottle UI on :8001 (v1's paths are relative to
 
 ## Tests (pure logic) — on the Mac
 ```
-python -m pytest tests/ -v
-python -m pytest -m "not hardware and not slow" -v    # fast subset
+.venv-v2/bin/python -m pytest -q                      # the actual v2 runner (Py 3.9.6); 178 passed / 0 skipped
+python -m pytest -m "not hardware and not slow" -v    # fast subset form
 ```
 
 ## Deploy = git push-to-deploy (Mac is source of truth; NOT rsync)
 ```
-git push pi main        # checks out into ~/pi-turret on the Pi
-git push strix main     # checks out into ~/pi-turret on Strix
+git push origin main ; git push pi main ; git push strix main   # push ALL THREE every deploy
 # each box repo has receive.denyCurrentBranch=updateInstead; .env is gitignored so secrets never ship.
-# rsync/scp ONLY for big artifacts (models, images, datasets, the compiled _edgetpu.tflite).
+# committed models in models/ SHIP VIA THE PUSH (no rsync). rsync/scp ONLY for datasets/images/fixtures.
+# push-to-checkout fails ("Could not update working tree") if a box has untracked files in the checked-out
+# path (e.g. fixtures the generator wrote into the box's tests/fixtures/) — rm the identical file, re-push.
 ```
 
-## Model build/export — on the Strix Halo box ONLY, via `ssh strix` (verify current Ultralytics flags first)
+## Model build/export — on Strix ONLY (verify current Ultralytics flags first)
 ```
-yolo export model=best.pt format=edgetpu imgsz=256 int8=True data=bird.yaml nms=False
-# the compiled file MUST end _edgetpu.tflite or the runtime silently uses CPU.
-# NOTE: edgetpu_compiler not yet installed on Strix (Ubuntu/x86-64, Py3.13) — set up in a venv/Docker first.
+# edgetpu_compiler v16.0 is INSTALLED (apt global, on PATH). Export venv = ~/turret-ml (uv, Py 3.12).
+~/turret-ml/bin/yolo export model=best.pt format=edgetpu imgsz=256 int8=True \
+    data=~/turret-ml/datasets/pigeons-single-class/data.yaml nms=False dynamic=False
+# gate: edgetpu_compiler -s -> "Number of Edge TPU subgraphs: 1", off-chip ~=0. File contains _edgetpu.
 ```
+
+## On-Pi detector benchmark (Pi truth)
+```
+ssh -o ControlMaster=no -o ControlPath=none pi 'cd ~/pi-turret && python3 scripts/pi_detector_bench.py --image ~/bird.jpg --iters 200'
+```
+Full retrain/deploy loop (field data -> annotate -> train -> export -> golden fixture -> deploy -> measure):
+**`.claude/claude-docs/MODEL_ITERATION.md`**.
 
 ## Git / GitHub
 ```
