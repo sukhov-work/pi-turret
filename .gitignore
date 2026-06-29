@@ -13,3 +13,6 @@ last_servo_state.txt
 
 /.claude/.env
 /.claude/claude-docs/NEXT_SESSION_PROMPT.md
+
+# monitoring: Grafana Cloud token/endpoints live only on the Pi, never in git
+/monitoring/secrets.env

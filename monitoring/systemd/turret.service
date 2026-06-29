@@ -1,0 +1,37 @@
+# Deployed to /etc/systemd/system/turret.service
+#
+# pi-turret v2 main application. MANUAL-START BY DESIGN:
+#   sudo systemctl start turret        # start
+#   sudo systemctl stop turret         # stop (SIGTERM -> main.py disarms: servos centered, pump OFF)
+#   systemctl status turret            # state
+#
+# It is intentionally NOT enabled (no boot auto-start). A later phase (IR remote, see
+# ir-remote-integration-plan.md) adds a separate supervisor process to manage this unit's
+# start/stop, so we leave lifecycle control manual/external for now.
+#
+# Monitoring: node_exporter's systemd collector (in config.alloy, unit_include matches
+# "turret.*") exports node_systemd_unit_state{name="turret.service",state="active"} for liveness.
+#
+# Restart=on-failure only recovers from crashes; it does NOT start on boot and does NOT restart
+# after a clean `systemctl stop`. main.py always boots DISARMED (fire stays SAFE until armed),
+# so an auto-restart never re-engages firing on its own. Switch to Restart=no for pure manual.
+
+[Unit]
+Description=pi-turret v2 main app (detection + aim + fire)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=jayson
+WorkingDirectory=/home/jayson/pi-turret
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 /home/jayson/pi-turret/main.py
+Restart=on-failure
+RestartSec=5
+# Give main.py time to run its disarm() handler on SIGTERM before SIGKILL.
+TimeoutStopSec=15
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=multi-user.target

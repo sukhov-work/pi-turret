@@ -1,0 +1,239 @@
+// ===================== /etc/alloy/config.alloy =====================
+// pi-turret monitoring — Grafana Alloy → Grafana Cloud (stack: mellowmushroom1792, region us).
+// Replaces the dead Grafana Agent static config 1:1 (node_exporter + journald + /var/log
+// file scrape + remote_write/Loki) and adds log-derived turret telemetry metrics.
+//
+// Credentials & endpoints come from /etc/alloy/secrets.env (root-owned, chmod 600) via the
+// systemd EnvironmentFile override — NEVER commit that file. Version-controlled copy of THIS
+// file lives at monitoring/config.alloy in the repo; deploy with monitoring/deploy.sh.
+//
+// Labels match the old config: instance="pi-jayson", job="integrations/raspberrypi-node".
+// ====================================================================
+
+logging {
+  level  = "info"
+  format = "logfmt"
+}
+
+// =================== METRICS: remote_write sink ===================
+prometheus.remote_write "grafana_cloud" {
+  endpoint {
+    url = sys.env("GRAFANA_CLOUD_PROM_URL")
+    basic_auth {
+      username = sys.env("GRAFANA_CLOUD_PROM_USER")
+      password = sys.env("GRAFANA_CLOUD_TOKEN")
+    }
+  }
+}
+
+// =================== LOGS: Loki write sink =======================
+loki.write "grafana_cloud" {
+  endpoint {
+    url = sys.env("GRAFANA_CLOUD_LOKI_URL")
+    basic_auth {
+      username = sys.env("GRAFANA_CLOUD_LOKI_USER")
+      password = sys.env("GRAFANA_CLOUD_TOKEN")
+    }
+  }
+}
+
+// =================== node_exporter (system health) ===============
+// systemd collector enabled (tight unit_include) so we get node_systemd_unit_state for the
+// turret + alloy services (process liveness) without inflating cardinality.
+prometheus.exporter.unix "node" {
+  enable_collectors = ["systemd"]
+  systemd {
+    unit_include = "(turret.*|alloy)\\.service"
+  }
+}
+
+discovery.relabel "node" {
+  targets = prometheus.exporter.unix.node.targets
+  rule {
+    target_label = "instance"
+    replacement  = "pi-jayson"
+  }
+  rule {
+    target_label = "job"
+    replacement  = "integrations/raspberrypi-node"
+  }
+}
+
+prometheus.scrape "node" {
+  targets         = discovery.relabel.node.output
+  forward_to      = [prometheus.remote_write.grafana_cloud.receiver]
+  job_name        = "integrations/node_exporter"
+  scrape_interval = "60s"
+}
+
+// =========== Alloy self-metrics + log-derived turret metrics ======
+// The turret_* metrics produced by loki.process below are registered in Alloy's own metrics
+// registry and exposed on the Alloy HTTP server (/metrics, 127.0.0.1:12345). The old Grafana
+// Agent auto-shipped its pipeline metrics; in Alloy we must scrape that endpoint ourselves and
+// remote_write the result — otherwise they are produced but never leave the box.
+//
+// IMPORTANT (Alloy v1.17 behavior, verified on-Pi 2026-06-29): stage.metrics metrics are
+// exposed PREFIXED as loki_process_custom_<name> and INHERIT the journal stream labels
+// (unit/transport/boot_id/level). So we keep loki_process_custom_turret_*, rename them back to
+// turret_*, and drop the inherited high-cardinality labels. honor_labels keeps each metric's
+// own instance/job (turret_* -> raspberrypi-node, alloy self -> agent-check).
+prometheus.scrape "alloy_self" {
+  targets = [{
+    __address__ = "127.0.0.1:12345",
+    instance    = "pi-jayson",
+    job         = "integrations/agent-check",
+  }]
+  forward_to      = [prometheus.relabel.alloy_self_keep.receiver]
+  metrics_path    = "/metrics"
+  scrape_interval = "60s"
+  honor_labels    = true
+}
+
+prometheus.relabel "alloy_self_keep" {
+  forward_to = [prometheus.remote_write.grafana_cloud.receiver]
+  // keep the log-derived turret metrics + minimal Alloy self-health
+  rule {
+    source_labels = ["__name__"]
+    regex         = "(loki_process_custom_turret_.*|alloy_build.*|up)"
+    action        = "keep"
+  }
+  // strip Alloy's stage.metrics prefix so Cloud + dashboards see clean turret_* names
+  rule {
+    source_labels = ["__name__"]
+    regex         = "loki_process_custom_(turret_.*)"
+    target_label  = "__name__"
+    replacement   = "$1"
+    action        = "replace"
+  }
+  // drop the journal/component labels the metrics inherit (keep instance/job + to_state/event)
+  rule {
+    regex  = "component_id|component_path|boot_id|transport|level|unit|service_name|filename|instance_id"
+    action = "labeldrop"
+  }
+}
+
+// =================== Logs: systemd journal =======================
+discovery.relabel "journal" {
+  targets = []
+  rule {
+    source_labels = ["__journal__systemd_unit"]
+    target_label  = "unit"
+  }
+  rule {
+    source_labels = ["__journal__boot_id"]
+    target_label  = "boot_id"
+  }
+  rule {
+    source_labels = ["__journal__transport"]
+    target_label  = "transport"
+  }
+  rule {
+    source_labels = ["__journal_priority_keyword"]
+    target_label  = "level"
+  }
+}
+
+loki.source.journal "journal" {
+  max_age       = "24h0m0s"
+  relabel_rules = discovery.relabel.journal.rules
+  // Route through loki.process so the turret service's journald output yields metrics.
+  forward_to    = [loki.process.turret.receiver]
+  labels        = {
+    instance = "pi-jayson",
+    job      = "integrations/raspberrypi-node",
+  }
+}
+
+// =================== Logs: direct file scrape ====================
+local.file_match "varlogs" {
+  path_targets = [{
+    __address__ = "localhost",
+    __path__    = "/var/log/{syslog,messages,*.log}",
+    instance    = "pi-jayson",
+    job         = "integrations/raspberrypi-node",
+  }]
+}
+
+loki.source.file "varlogs" {
+  targets    = local.file_match.varlogs.targets
+  forward_to = [loki.write.grafana_cloud.receiver]
+}
+
+// =================== Log-derived turret metrics ==================
+// Regexes VERIFIED against the v2 source (2026-06-29):
+//   FIRE   -> app/pipeline.py:125  logger.info("FIRE #%s (shot %d, aim_err=%.0fpx)")
+//   state  -> app/pipeline.py:120  logger.info("state %s -> %s")
+//   target -> app/control.py:132/134/136  "target acquired #..|lost (#..)|switch #.. -> #.."
+// CARDINALITY: target_id (#53) is intentionally NOT promoted to a label (unbounded). Only the
+// finite to_state/from_state/event sets become labels. raw logs stay queryable via LogQL.
+loki.process "turret" {
+  forward_to = [loki.write.grafana_cloud.receiver]   // ALL raw logs stay queryable in Loki
+
+  // Scope metric extraction to the turret service ONLY. Without this, generic lines like
+  // tailscaled's "state X -> Y" pollute turret_state_transitions_total. (unit label is set by
+  // discovery.relabel.journal above.) forward_to still ships every line; this only gates metrics.
+  stage.match {
+    selector = "{unit=\"turret.service\"}"
+
+    // --- FIRE events: "FIRE #53 (shot 1, aim_err=7px)" ---
+    stage.regex {
+      expression = "FIRE #(?P<target_id>\\d+) \\(shot (?P<shot>\\d+), aim_err=(?P<aim_err>\\d+)px\\)"
+    }
+    stage.metrics {
+      metric.counter {
+        name              = "turret_fire_events_total"
+        description       = "Total turret fire events"
+        source            = "aim_err"     // present only on FIRE lines; action=inc => +1 per match
+        action            = "inc"
+        max_idle_duration = "24h"
+      }
+      metric.gauge {
+        name              = "turret_aim_error_px"
+        description       = "Last aim error in pixels at fire"
+        source            = "aim_err"
+        action            = "set"
+        max_idle_duration = "24h"
+      }
+      metric.histogram {
+        name        = "turret_aim_error_px_hist"
+        description = "Aim error distribution (pixels)"
+        source      = "aim_err"
+        buckets     = [1, 2, 5, 10, 20, 50, 100]
+      }
+    }
+
+    // --- State transitions: "state aiming -> firing" --- (to_state is a bounded set: promote it)
+    stage.regex {
+      expression = "state (?P<from_state>\\w+) -> (?P<to_state>\\w+)"
+    }
+    stage.labels {
+      values = { to_state = "" }   // bounded (searching/tracking/aiming/firing/cooldown/safe)
+    }
+    stage.metrics {
+      metric.counter {
+        name              = "turret_state_transitions_total"
+        description       = "State machine transitions (by destination state)"
+        source            = "to_state"
+        action            = "inc"
+        max_idle_duration = "24h"
+      }
+    }
+
+    // --- Target lifecycle: acquired / lost / switch --- (event is a bounded set: promote it)
+    stage.regex {
+      expression = "target (?P<event>acquired|lost|switch)"
+    }
+    stage.labels {
+      values = { event = "" }
+    }
+    stage.metrics {
+      metric.counter {
+        name              = "turret_target_events_total"
+        description       = "Target acquired/lost/switch events"
+        source            = "event"
+        action            = "inc"
+        max_idle_duration = "24h"
+      }
+    }
+  }
+}

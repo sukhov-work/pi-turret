@@ -1,0 +1,6 @@
+# /etc/default/alloy — Alloy service settings (deployed copy of this file).
+# Pin the HTTP server to 127.0.0.1:12345 so the in-config self-scrape of /metrics is
+# deterministic, and keep the WAL/storage on disk (NOT /tmp — survives reboot).
+CONFIG_FILE="/etc/alloy/config.alloy"
+CUSTOM_ARGS="--server.http.listen-addr=127.0.0.1:12345 --storage.path=/var/lib/alloy/data"
+RESTART_ON_UPGRADE=true
