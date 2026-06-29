@@ -69,4 +69,11 @@ w/ inf->None; v1-mirrored `/api/cmd`,`/api/control-cmd`,`/api/turret-state` + ne
 **lazy-`bottle`** adapter (`create_app`/`serve`/`start_web_thread`), so the Mac venv (no bottle)
 still imports it. `ControlLoop.apply_config()` refreshes the few init-snapshotted values (cal,
 selector hysteresis/dwell, aux-enable, frame dims); all other tunables already read live per tick.
-`app/web_ui.html` = vanilla-JS console (daemon thread, `cfg.app.web_port`=8001). UNVERIFIED on Pi.
+`app/web_ui.html` = vanilla-JS console (daemon thread, `cfg.app.web_port`=8001).
+**UPDATE 2026-06-29 (supersedes the tuning detail above — see `mem:decisions/control_and_persistence`):**
+ALL 14 sections are now editable (not whitelisted); `update_config` swap is followed by
+`_resync()` which calls `apply_config()` on the held objects (servo/tracker/capture/detector) so
+hardware/driver sections apply live too (restart-only fields persist + apply on reboot). Added:
+per-param ⓘ docs (`PARAM_DOCS`) + glossary `claude-docs/PARAMETERS.md`, DET-CAM debug video,
+manual FIRE, calibration card (set-home/limits/click-fit), `config.local.yaml` overlay persistence.
+Web routes now Pi-VERIFIED (config validates; deployed `eb1e409`); browser UX owner-verified.

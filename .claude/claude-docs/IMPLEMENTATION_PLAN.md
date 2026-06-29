@@ -243,13 +243,13 @@ box has untracked files in the path being checked out (e.g. fixtures the generat
 | 1.2 `capture.py` PiCam lores YUV420 | AUTHORED | FPS/focus truth (Pi) |
 | 1.3/1.4 `IouTracker` + lead predictor | **DONE (Mac)** | tune on a recorded Pi clip |
 | 1.5 scoring + hysteresis selector | **DONE (Mac)** | tune weights on-device |
-| 1.6 calibration apply+fit (v1 preset) | **DONE (Mac)** | run the **fit on the Pi rig** |
+| 1.6 calibration apply+fit + **on-rig calibration UI** (Set Home / travel limits / click→fit, persists to `config.local.yaml`) | **DONE (Mac); UI deployed `eb1e409`** | run the **fit on the real rig** + verify hit accuracy |
 | 1.7 controller + `pca9685` port + `ServoController` | **DONE (Mac logic)** | servo dry-run within clamps (Pi) |
 | 1.8 `FireStateMachine` + `killzone` + `Pump` | **DONE (Mac)** | LED-stand-in + decoy fire (Pi) |
 | 1.9 headless + `annotate`/`snapshots` | AUTHORED (partial) | measure zero render cost (Pi) |
 | 1.10 motion-gated seam | TODO | behind `app.detection_mode` flag |
-| 1.11 web UI (Bottle) | **DONE (Mac logic)** | verify routes/live-tuning on Pi (`app/web.py`, `app/web_ui.html`) |
-| 1.12 USB-webcam streamer | **DONE (Mac logic)** | verify mjpg-streamer flags/device on Pi (`app/streamer.py`) |
+| 1.11 web UI (Bottle) — **all 14 sections live-tunable + persistable, per-param ⓘ docs, DET-CAM debug video, manual FIRE, disarm-freeze, boot-SAFE** | **DONE; Pi-VERIFIED `eb1e409`** (config validates, routes import; browser UX owner-verified). Param reference: `claude-docs/PARAMETERS.md` |
+| 1.12 USB-webcam streamer | **DONE + Pi-VERIFIED 2026-06-29** | `/dev/video0`=UVC cam; streamer launches → HTTP 200 MJPEG → stops; binary = v1's committed ARM `_build/mjpg_streamer` |
 | 1.13 LCD lifecycle display (`actuate/lcd.py`, `app/display.py`) | **DONE (Mac logic)** | verify on real LCD (Pi) |
 | 1.14 status LED + aux marker (`actuate/indicators.py`) | **DONE (Mac)** | verify BCM23/27 (Pi) |
 | 1.15 IR remote (`app/remote.py` seam + `RemoteConfig`) | **SEAM ONLY** | owner: confirm pin; capture keys (Pi) |

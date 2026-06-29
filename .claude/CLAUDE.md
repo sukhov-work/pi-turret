@@ -10,6 +10,7 @@ never editing v1 in place. Hardware is fixed; Debian 11 Bullseye + Python 3.9 is
 - `.claude/claude-docs/V2-design-plan.md` — what to build (backend, Edge-TPU pipeline, aiming, phases).
 - `.claude/claude-docs/pi-turret-v1-legacy-design.md` — what exists today (file map, servo math, GPIO map, footguns).
 - `.claude/claude-docs/IMPLEMENTATION_PLAN.md` — the build plan. If missing, generate it first (see the skill).
+- `.claude/claude-docs/PARAMETERS.md` — every tunable explained (long form of the UI ⓘ tooltips / `PARAM_DOCS`).
 
 ## Conventions — check before writing v2 code
 | Convention | Path |
@@ -72,6 +73,7 @@ The v2 venv/layout and exact test runner are set in Phase 0 of the plan — conf
   `v1/PCA9685.py`, `v1/Utils.py`, `v1/models/`, `v1/edgetpu-yolo/`, `v1/mjpg-streamer/`, `v1/index.html`.
   Run it with `cd v1 && python3 main.py` — v1's relative paths resolve against the `v1/` CWD.
 - **v2 (build here):** new tree + venv per the plan; v1 stays runnable.
+- **Config:** typed defaults ← `config.yaml` (committed base) ← `config.local.yaml` (**git-ignored, per-box overlay**, written by the UI **Save**; per-key delta). **All 14 sections are UI-tunable + persistable**; edits re-sync into live objects via `apply_config()` (servo/tracker/capture/detector) — restart-only fields persist + apply on reboot. Calibrated home/limits/aim coeffs/rotation live in the overlay and restore on boot.
 - **`models/` (committed):** Edge-TPU detector models for tests + deploy — vanilla `yolov8n_coco80_256_int8_edgetpu.tflite` + finetuned `bird_yolov8n_256_int8_edgetpu_run<N>.tflite` (+ `.pt` sources). See `models/README.md`. Compiled on Strix; a deployable file must end `_edgetpu.tflite`.
 
 ## Top footguns
