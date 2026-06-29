@@ -232,13 +232,13 @@ creds in `.claude/.env`). **Reminder:** uncommitted/unpushed Mac changes are NOT
 - **Model:** DONE — first finetuned single-class bird model trained (HUB) + compiled clean (1 subgraph,
   252 ops): `models/bird_yolov8n_256_int8_edgetpu_run1.tflite` (+ vanilla reference). (§9.1/§9.2)
 - **INT8 calibration imgs:** DONE — the Roboflow set (1152 imgs) staged on Strix doubles as calib.
-- **Remaining (§9.3→§9.6):** golden fixture (un-skip the decode test) → deploy to Pi → measure latency/FPS → integrate.
+- **Remaining (§9.3→§9.6):** ✅ ALL DONE 2026-06-29 — golden fixture landed (coords_normalized=True) → run1 deployed to Pi → measured **16.99 ms / 59 FPS** full infer (sane boxes ✓) → integrated. YOLOv8n@256 is the P1 detector.
 
 ### Per-step status
 | Step | Status | What finishes it (machine) |
 |---|---|---|
 | 0.1–0.3 foundation (tree/venv, `config`, `contracts`) | **DONE (Mac)** | — |
-| 1.1 `decode_v8` + NMS + golden guard | **DONE (Mac logic)** | ⟶ **§9 Detector Build Track** (Strix export+compile, golden fixture, Pi latency) |
+| 1.1 `decode_v8` + NMS + golden guard | **DONE + Pi-VERIFIED 2026-06-29** | golden fixture landed (coords_normalized=True); run1 on Pi: full infer **16.99 ms / 59 FPS** (TPU 12.16 ms), sane boxes ✓ |
 | 1.1b MobileDet/SSD backend | TODO | ⟶ **§9.5** `detect/mobiledet_coral.py`; research says this is the *default*, not just fallback |
 | 1.2 `capture.py` PiCam lores YUV420 | AUTHORED | FPS/focus truth (Pi) |
 | 1.3/1.4 `IouTracker` + lead predictor | **DONE (Mac)** | tune on a recorded Pi clip |
@@ -254,8 +254,9 @@ creds in `.claude/.env`). **Reminder:** uncommitted/unpushed Mac changes are NOT
 | 1.14 status LED + aux marker (`actuate/indicators.py`) | **DONE (Mac)** | verify BCM23/27 (Pi) |
 | 1.15 IR remote (`app/remote.py` seam + `RemoteConfig`) | **SEAM ONLY** | owner: confirm pin; capture keys (Pi) |
 
-**Open flags:** (a) `decode_v8.coords_normalized` default is UNVERIFIED until the real-model golden
-fixture lands (`tests/fixtures/raw_output.npy` + `predict_ref.json`); (b) servo pulse band — docs
+**Open flags:** (a) ✅ RESOLVED 2026-06-29 — `decode_v8.coords_normalized` is **pinned `True`** by the
+landed golden fixture (`tests/fixtures/raw_output.npy` + `predict_ref.json`); Ultralytics v8 tflite
+exports emit normalized xywh. (b) servo pulse band — docs
 cite ~1000–2000 µs but v1 actually runs ~556–1023 µs, so v2 keeps v1's mapping + a `[500,2500] µs`
 guard (re-measure on Pi).
 
@@ -372,21 +373,25 @@ CPU → catastrophic on Pi 4), **SpaghettiNet-EdgeTPU = top later candidate**. B
 - **Go/No-Go:** reject any candidate needing 2+ subgraphs or a split tail (Pi-4 CPU fallback ≈
   1800–2100 ms vs ~22 ms mapped). **Machine:** Strix.
 
-### 9.3 Decode golden fixture *(un-skips the Mac guard test)*
-- On Strix/Pi run Ultralytics `model.predict` on a **saved frame**; dump the raw output tensor →
-  `tests/fixtures/raw_output.npy` + the reference boxes/scores → `tests/fixtures/predict_ref.json`.
-  Pull artifacts back (rsync/scp), commit on the Mac.
-- This **pins `detect/decode.py::decode_v8.coords_normalized`** and turns
-  `test_v8_decode_matches_ultralytics_reference` green — the permanent guard against the v5/v8
-  decoder mismatch (the original v1 Coral bug). **Machine:** Strix/Pi to generate, Mac to assert.
+### 9.3 Decode golden fixture *(un-skips the Mac guard test)* — ✅ **DONE 2026-06-29**
+- **Done via `tests/fixtures/generate_golden_fixture.py`** (committed): on **Strix** it reads the literal
+  dequantized tflite output (== what `coral.py` reads on the Pi) from run1's pre-compile INT8 twin
+  `test-8n-run-1_full_integer_quant.tflite` + Ultralytics' own `predict` on the same val frame, then
+  **self-pins** the flag by replaying the test for both values. Artifacts `raw_output.npy` (shape
+  `[1,5,1344]`) + `predict_ref.json` pulled to the Mac and committed.
+- **Pinned `coords_normalized=True`** (the `False` path mis-decodes by ~1104 px). Also added
+  **frame-bound clipping to `decode_v8`** (matches Ultralytics `clip_boxes`; the only delta was an
+  off-frame `y1`). `test_v8_decode_matches_ultralytics_reference` now green → **178 passed / 0 skipped**.
 
-### 9.4 On-Pi latency + sanity *(Pi truth — no number is real until measured here)*
-- Inference-only benchmark per passing candidate; record **ms/frame + FPS**. Note USB port: **USB2 ≈
-  3× slower than USB3**. Stay on `libedgetpu1-std` (no active cooling).
-- `detect/coral.py::CoralDetector.infer` returns **sane Detections** on a real frame, mapped to
-  full-frame pixels (the `Detection` contract).
-- **Go/No-Go:** GO if measured detect leaves headroom for the ~15–24 FPS control budget; if YOLOv8n
-  split or is too slow, **ship MobileDet** and keep YOLOv8n as the gated upgrade. **Machine:** Pi.
+### 9.4 On-Pi latency + sanity *(Pi truth)* — ✅ **DONE 2026-06-29 → GO**
+- **Measured** via `scripts/pi_detector_bench.py` (committed), run1 edgetpu, **USB3 SuperSpeed (5000M)**,
+  `libedgetpu1-std`, system Py 3.9.2 + pycoral (no venv), 200 iters @256: **TPU invoke 12.16 ms (82 FPS);
+  full `infer` 16.99 ms (59 FPS); decode+dequant ~4.8 ms**; warm `load()` ~2.7 s.
+- **Sane boxes ✓** — Pi edgetpu on the val frame `(186.0,0.0,965.3,1098.6) score 0.622` ≈ the Strix-CPU
+  fixture `(186.0,0.0,965.3,1109.2)` within ~10 px (TPU-vs-CPU int8) = full-stack decode validation.
+- **Fixed on Pi truth:** `coral.py._preprocess` now quantizes for **int8-input** edgetpu models (was
+  feeding uint8 → `ValueError`). **Go/No-Go: GO** — 59 FPS ≫ the 15–24 FPS control budget; **YOLOv8n@256
+  is the P1 detector, MobileDet fallback not needed.** **Machine:** Pi.
 
 ### 9.5 Integrate into v2 *(same `Detection` contract — no downstream churn)*
 - **YOLO path:** `detect/coral.py` (exists) + `detect/decode.py::decode_v8` (exists). Set

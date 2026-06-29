@@ -1,71 +1,61 @@
 # mem:decisions/detector_build_plan — the Coral detector (model) track
 
-The **active work** after the Mac-authored spine + UI. Step detail: `IMPLEMENTATION_PLAN.md §9`.
-(Related: `mem:core`, `mem:project/dev_environment`, research
+Step detail: `IMPLEMENTATION_PLAN.md §9`. (Related: `mem:core`, `mem:project/dev_environment`, research
 `.claude/claude-docs/plans/coral-detector-selection-research.md`.)
 
-## STATUS 2026-06-29 — first model trained + converted + committed
-First finetuned model done: HUB run `test-8n-run-1.pt` (single-class bird) → exported on Strix →
-**`models/bird_yolov8n_256_int8_edgetpu_run1.tflite`** (committed; gate PASS: 1 subgraph, 252 ops all
-on TPU, 3.11 MiB on-chip, 7.88 KiB off-chip). `models/` is a **committed** folder (see
-`models/README.md`) holding the deployable `_edgetpu.tflite` + `.pt` source + a vanilla
-`yolov8n_coco80_256_int8_edgetpu.tflite` reference. **Next: golden fixture (un-skip the decode test) →
-deploy run1 to the Pi → measure latency/FPS (Pi-only truth).** Each future finetune adds a `run<N>` here.
+## STATUS 2026-06-29 — ✅ DETECTOR TRACK COMPLETE (run1 live + Pi-measured)
+Single-class "bird" YOLOv8n@256 INT8 is **running on the Coral on the Pi**, decode verified, latency
+measured. **YOLOv8n@256 is the confirmed P1 detector (GO); MobileDet fallback NOT needed.**
+- **Model:** `models/bird_yolov8n_256_int8_edgetpu_run1.tflite` (HUB run `test-8n-run-1`, single class),
+  git-tracked → delivered to Pi via `git push pi main` (no rsync). `config.{py,yaml}.detector` →
+  `model_path=…_run1.tflite`, `coords_normalized=true`, `num_classes=1`, `input_size_px=256`, `backend=coral_yolo`.
+- **MEASURED on Pi (run1 edgetpu, USB3 SuperSpeed 5000M, `libedgetpu1-std`, system Py 3.9.2 + pycoral, no venv),
+  200 iters @256:** TPU invoke **12.16 ms median (82 FPS)**; full `CoralDetector.infer`
+  (preprocess+invoke+dequant+decode) **16.99 ms median (59 FPS)**; decode+dequant ≈ **4.8 ms**;
+  warm `load()` ≈ 2.7 s (cold ≈ 5.2 s = TPU firmware upload). 59 FPS ≫ the 15–24 FPS control budget → **GO**.
+- **Sane boxes ✓ (full-stack decode validation):** Pi edgetpu on the val frame →
+  `cls=0 score=0.622 xyxy=(186.0,0.0,965.3,1098.6)`; Strix-CPU golden fixture on the same frame →
+  `(186.0,0.0,965.3,1109.2) 0.622` — same box within ~10 px (TPU-vs-CPU int8 rounding).
 
-## ⚠️ Existing models are JUNK — starting from scratch (owner, 2026-06-29)
-All pre-existing weights in `v1/models/` and on the Pi (pigeon-only ONNX/tflite, `pigeon-y8s_edgetpu*`,
-yolov5s, SSD-MobileNet-V3) are **obsolete — do not ship them**. Useful only as evidence that a
-**YOLOv8 model already compiled cleanly to Edge-TPU here** (v1's bug was decode, not compile → de-risks
-the YOLOv8n path). Train a fresh model.
+## decode contract — PINNED 2026-06-29 (golden fixture)
+- **`coords_normalized=True`** for the deployed coral_yolo path. Ultralytics v8 *detection* TFLite/edgetpu
+  exports emit box xywh **normalized [0,1]** (the `.pt` emits input-pixels). The `False` path mis-decodes
+  by ~1104 px (the catastrophic-decoder signature the golden test guards).
+- **Real output shape is `[1,5,1344]`** (1344 = 32²+16²+8² for input 256; 8400 is for 640). `decode_v8`
+  is anchor-count-agnostic — fine.
+- **`decode_v8` now clips boxes to frame bounds** (matches Ultralytics `clip_boxes`); the only delta vs the
+  reference was an off-frame `y1=-14`→`0` (rest matched <0.1 px). Golden test green → **178 passed / 0 skipped**.
+- **Fixture generator committed:** `tests/fixtures/generate_golden_fixture.py` self-pins the flag by
+  replaying the test for both values (no assumption). Regenerate for run2+ from the `_full_integer_quant.tflite`.
+
+## coral.py fix (Pi truth, 2026-06-29)
+- The edgetpu model **input tensor is INT8** (scale 1/255, zero −128); `coral.py._preprocess` fed **uint8**
+  → `ValueError: Got UINT8 but expected INT8`. **Fixed:** quantize per the input tensor's own dtype +
+  (scale,zero): `real=px/255 → /scale + zero → round/clip → astype(dtype)` (handles int8 + uint8 + float).
+  Output dequant was already correct. Possible later opt: for scale=1/255 this reduces to `px−128`.
+- Relaxed the `_edgetpu.tflite` name check to match `_edgetpu` **anywhere** (run-versioned names). pycoral
+  `make_interpreter` uses the TPU regardless of filename anyway.
 
 ## Model + training strategy (decided 2026-06-29)
-- **Dataset:** owner's **Roboflow** set — **single class `['bird']`** (workspace
-  `jayson-x-an0sg/pigeons-single-class`), **1152 train / 196 val / 63 test**, YOLO-format normalized
-  xywh. **Staged on Strix:** `~/turret-ml/datasets/pigeons-single-class/` with a **fixed data.yaml**
-  (absolute `path:` — Roboflow's default `../train/images` resolves off-tree). Source on Mac:
-  `/Users/yevhens/Downloads/Pigeons Single class.yolov8`.
-- **First model:** **YOLOv8n @256, single class `bird`** → output `[1,5,8400]`, matches the existing
-  `decode_v8` single-class path + the golden test; `config.detector.num_classes=1` (already the default).
-- **imgsz = 256, NOT 640.** The Coral inference res is the binding constraint (256 compiled clean; 320+
-  untested), so **train == deploy** avoids a resolution mismatch; a 640 model's val mAP would overstate
-  real 256 accuracy, and 640's small-bird benefit is lost when inferring at 256 (the fix for distant
-  birds is a longer lens / later a 320 deploy + re-gate, not higher train res).
-- **epochs ~300, patience ~50** (1152 imgs converge well before that; 1000/100 is overkill but would
-  early-stop). Keep YOLOv8 augmentation defaults (mosaic, fliplr 0.5, hsv, close_mosaic 10).
-- **Training compute:** owner leaning **Ultralytics HUB cloud** (GPU, fast) — Strix torch is CPU-only
-  for now (ROCm 7.1/gfx1151 present but not wired into torch; would need `HSA_OVERRIDE_GFX_VERSION`,
-  don't rabbit-hole). Local Strix CPU train OK-ish at 256. **Either way the edgetpu export+compile runs
-  on Strix** (compiler is x86-local) and needs the dataset there for INT8 calib (now staged).
-- **INT8 calibration:** the **Roboflow training images double as the >300-img calib set**. Export:
-  `yolo export model=best.pt format=edgetpu imgsz=256 int8=True data=<dataset>/data.yaml nms=False dynamic=False`.
-- **Flow:** train (HUB or Strix) → download best.pt → export edgetpu on Strix (gate) → golden fixture →
-  **deploy turret test** → collect real deployment images → annotate → more precise models.
+- **Dataset:** Roboflow `jayson-x-an0sg/pigeons-single-class`, **single class `['bird']`**, 1152/196/63,
+  staged on Strix `~/turret-ml/datasets/pigeons-single-class/` (fixed absolute `path:` in data.yaml);
+  doubles as the >300-img INT8 calib set. Mac source: `~/Downloads/Pigeons Single class.yolov8`.
+- **imgsz=256 (train==deploy; Coral is locked at 256), epochs≈300/patience≈50.** Keep YOLOv8 aug defaults.
+- **Export (Strix):** `yolo export model=best.pt format=edgetpu imgsz=256 int8=True data=…/data.yaml nms=False dynamic=False`.
+- **Next finetune = run2:** train (HUB or Strix) → export edgetpu on Strix → regenerate golden fixture →
+  add `models/bird_yolov8n_256_int8_edgetpu_run2.tflite` (+ `.pt`) → re-measure on Pi. Iterate on real deployment imagery.
 
 ## Strix toolchain — INSTALLED 2026-06-29
-- `edgetpu_compiler` **v16.0** (apt, Coral repo, signed-by keyring) — global, on PATH.
-- **`~/turret-ml`** = uv-managed **Python 3.12.13** venv (uv 0.11.25 via pipx; Strix default python is
-  3.13 which breaks the TF/onnx2tf chain → 3.12 venv). Install with `uv pip install --python
-  ~/turret-ml/bin/python ...`; venv has **no system pip** (`pip` pkg added so ultralytics auto-installs
-  export deps). Tools: `~/turret-ml/bin/{yolo,python}`. Installed: ultralytics, roboflow, onnx, onnxslim,
-  onnxruntime 1.27.0; TF auto-pulled `<=2.19.0` at export. Smoke-test log `/tmp/mlbuild.log`.
+- `edgetpu_compiler` **v16.0** (apt, global, on PATH). **`~/turret-ml`** = uv-managed **Python 3.12.13** venv
+  (Strix system Py 3.13 breaks the TF chain). Tools `~/turret-ml/bin/{yolo,python}`; ultralytics 8.4.81,
+  onnxruntime 1.27.0, TF ≤2.19.0, cv2 4.13.0. INT8 tflite twins live under `~/turret-ml/*_saved_model/`.
 
-## The compile gate (Stage 0, Strix only)
-`edgetpu_compiler -s` must show **`Number of Edge TPU subgraphs: 1`** and off-chip streaming ≈0. Export
-with **`nms=False dynamic=False imgsz=256 int8=True data=…`**. Compiled file **must end `_edgetpu.tflite`**.
-**MEASURED 2026-06-29 (stock yolov8n@256, edgetpu_compiler 16.0):** PASS — **1 subgraph, all 256 ops on
-TPU (0 on CPU)**, on-chip 3.57 MiB / 3.23 MiB free, off-chip 7.88 KiB (≈0). v8 head ops
-(SOFTMAX/TRANSPOSE/STRIDED_SLICE/RESHAPE) **map cleanly** → **YOLOv8n confirmed primary; MobileDet
-fallback only** (if trained model's *on-Pi latency* disappoints — Pi ms/FPS still UNVERIFIED). The
-single-class head is smaller than stock 80-class → expect an equal/cleaner compile.
-
-## Integration (code already half-there)
-- YOLO: `detect/coral.py::CoralDetector` + `detect/decode.py::decode_v8` (anchor-free, no objectness)
-  EXIST. Set `config.detector.{backend,model_path,input_size_px=256,conf,iou,num_classes=1}`.
-- **Golden fixture** (un-skips `test_v8_decode_matches_ultralytics_reference`): dump Ultralytics
-  `model.predict` raw tensor → `tests/fixtures/raw_output.npy` + `predict_ref.json`, commit on Mac.
-  Pins `decode_v8.coords_normalized` — permanent v5/v8 mismatch guard.
+## Compile gate (Stage 0, Strix only) — YOLOv8n PASSED
+`edgetpu_compiler -s` must show **`Number of Edge TPU subgraphs: 1`** + off-chip ≈0. run1: **1 subgraph,
+252 ops all on TPU**, on-chip 3.11 MiB, off-chip 7.88 KiB. (Stock yolov8n@256: 1 subgraph, 256 ops.)
+v8 head ops (SOFTMAX/TRANSPOSE/STRIDED_SLICE/RESHAPE) map cleanly on this toolchain.
 
 ## Truth ownership
-Op-map = Strix only. ms/FPS, sane boxes = Pi only (USB2 ≈ 3× slower than USB3; `libedgetpu1-std`).
-Decode correctness = Mac (golden test). Pi runtime stack: pycoral 2.0.0 / tflite-runtime 2.5.0.post1 /
-libedgetpu 16.0 (feranick fork for Bullseye). Coral is effectively EOL.
+Op-map = Strix only. ms/FPS + sane boxes = Pi only (now measured, above). Decode correctness = Mac golden
+test. Pi runtime: pycoral / tflite-runtime / libedgetpu 16.0 on Bullseye; Coral on its own USB3 bus (5000M).
+Reach the Pi with `ssh -o ControlMaster=no -o ControlPath=none pi` if a stale control socket times out.
