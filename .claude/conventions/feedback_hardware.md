@@ -15,9 +15,10 @@ way code changes are not. The owner stated this explicitly while reviewing v2 wi
 
 **How to apply:** Before writing or changing anything that touches servos, the pump, LEDs, the LCD, or
 a new sensor, check the as-built pin map first (`mem:architecture/wiring`, verified from
-`v1/TurretHandler.py` + `v1/PCA9685.py`) and match it exactly. v1 pins: pump=BCM26, aux laser=BCM27,
+`v1/TurretHandler.py` + `v1/PCA9685.py`) and match it. v1 pins: pump=BCM26, aux laser=BCM27,
 status LED=BCM23, PCA9685=I2C bus 1 @ 0x40, 1602A LCD on the same I2C bus 1, pan=PCA9685 ch1/tilt=ch0.
-If a task seems to need a pin/wiring change, stop and ask.
+**v2 divergence (owner-rewired 2026-06-29): the aux laser/marker is on BCM24, not v1's BCM27** — v1 code
+still drives BCM27 (now disconnected). All other pins match v1. If a task seems to need a pin/wiring change, stop and ask.
 
 **Related preference — use the LCD richly:** the owner wants the 1602A LCD to surface as much useful
 lifecycle info as possible throughout the run (boot+IP, state, selected target, aim error, kill-zone,

@@ -373,11 +373,11 @@ const PARAM_DOCS = {
   lcd_enabled:"Whether the 1602A I2C LCD is driven (boot/IP, state, target, aim err, fps, shots). Fail-safe -- LCD errors never stop control. False if no LCD fitted.",
   lcd_refresh_hz:"How often the LCD re-renders (Hz). Deliberately low (~4) so the slow I2C write -- on its own thread -- never blocks the control loop.",
   status_led_enabled:"Whether the BCM23 status LED is driven (lit while ARMED/not-SAFE). Reused from v1. False to silence it.",
-  aux_marker_enabled:"Whether the BCM27 aux laser may AUTO-light as an aim marker during AIMING/FIRING (opt-in, laser safety). The manual Marker On/Off buttons override this regardless; default off."
+  aux_marker_enabled:"Whether the BCM24 aux laser may AUTO-light as an aim marker during AIMING/FIRING (opt-in, laser safety). The manual Marker On/Off buttons override this regardless; default off."
  },
  pump:{
   pump_gpio_bcm:"[restart] BCM pin driving the water-pump relay/MOSFET (26 -- v1's 'main laser' pin). MUST go through a relay/MOSFET + flyback diode, never a bare GPIO. The gpiozero device binds at start.",
-  aux_gpio_bcm:"[restart] BCM pin for the aux laser/marker (27, reused from v1). Drives the opt-in/manual aim marker.",
+  aux_gpio_bcm:"[restart] BCM pin for the aux laser/marker (24 -- rewired to its own pin, was v1's 27). Drives the opt-in/manual aim marker.",
   status_led_gpio_bcm:"[restart] BCM pin for the status LED (23, reused from v1).",
   active_high:"[restart] Whether the pump relay energizes on a HIGH (true) or LOW signal -- depends on your relay module. Wrong polarity = pump on when it should be off. Verify carefully; it controls water."
  },

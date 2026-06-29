@@ -1,8 +1,8 @@
-"""GPIO indicator outputs — status LED (BCM23) and aux marker (BCM27).
+"""GPIO indicator outputs — status LED (BCM23) and aux marker (BCM24).
 
-Same pins and same driver as v1 (``gpiozero.LED``) — no rewiring:
+Same driver as v1 (``gpiozero.LED``); status LED keeps v1's pin, aux is rewired:
   - **status LED, BCM23**: lit while ARMED / actively scanning, off when SAFE.
-  - **aux marker, BCM27**: v1's aux laser; OPT-IN aim marker, off by default
+  - **aux marker, BCM24**: rewired from v1's BCM27 to its own pin; OPT-IN aim marker, off by default
     (laser safety — never auto-driven unless ``app.aux_marker_enabled``).
 
 Fail-safe like the LCD: an indicator error logs and is swallowed, never crashing

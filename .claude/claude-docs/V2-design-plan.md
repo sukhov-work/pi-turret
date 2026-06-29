@@ -176,7 +176,7 @@ plans: `IMPLEMENTATION_PLAN.md §8` (steps 1.13–1.15).
   per state — SEARCHING (`SCAN <spin> <fps> / trk:N ARM|SAFE`), AIMING (`AIM#id e<err> / KZ:Y WF
   ARM`), FIRING (`FIRE! #id / shots:N`), COOLDOWN, SAFE. Rendering is a low-rate thread
   (`app/display.py`) so I2C never blocks control; the device wrapper is fail-safe.
-- **Indicators:** BCM23 status LED (lit while not SAFE) + BCM27 aux laser as an **opt-in** aim marker
+- **Indicators:** BCM23 status LED (lit while not SAFE) + BCM24 aux laser (rewired from v1's BCM27) as an **opt-in** aim marker
   (default off — laser safety), via `gpiozero.LED` exactly as v1; off on disarm.
 - **IR remote (PROPOSED — owner is considering it).** A simple IR receiver (owner's old Arduino kit)
   for start/stop + basic control: arm/disarm, toggle fire-enable, center, jog pan/tilt. v1 has **no

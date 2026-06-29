@@ -257,7 +257,7 @@ box has untracked files in the path being checked out (e.g. fixtures the generat
 | 1.11 web UI (Bottle) — **all 14 sections live-tunable + persistable, per-param ⓘ docs, DET-CAM debug video, manual FIRE, disarm-freeze, boot-SAFE** | **DONE; Pi-VERIFIED `eb1e409`** (config validates, routes import; browser UX owner-verified). Param reference: `claude-docs/PARAMETERS.md` |
 | 1.12 USB-webcam streamer | **DONE + Pi-VERIFIED 2026-06-29** | `/dev/video0`=UVC cam; streamer launches → HTTP 200 MJPEG → stops; binary = v1's committed ARM `_build/mjpg_streamer` |
 | 1.13 LCD lifecycle display (`actuate/lcd.py`, `app/display.py`) | **DONE (Mac logic)** | verify on real LCD (Pi) |
-| 1.14 status LED + aux marker (`actuate/indicators.py`) | **DONE (Mac)** | verify BCM23/27 (Pi) |
+| 1.14 status LED + aux marker (`actuate/indicators.py`) | **DONE (Mac)** | verify BCM23 (status) / BCM24 (aux, rewired) on Pi |
 | 1.15 IR remote (`app/remote.py` + `RemoteConfig`) | **PLANNED → buildable** (pin GATE cleared: BCM17/GPIO17/pin11; stack = gpio-ir+rc-core+evdev; bare VS1838B + RC filter, breakout lost) | OS/keytable + listener + MANUAL state + manual fire on Pi; tune jog on rig. **Next phase** — plan: `claude-docs/plans/moniotoring-and-remote/ir-remote-integration-plan.md` |
 | 1.16 Monitoring (Alloy → Grafana Cloud) + `turret.service` | **DONE + Cloud-VERIFIED 2026-06-29** | Alloy v1.17 ships node/log/turret metrics; manual-start `turret.service`. Ops: `monitoring/README.md` |
 
@@ -286,11 +286,11 @@ New hardware is **additive on free pins only.**
 | 1602A LCD | I2C **bus 1** (`rpi_lcd`, ~`0x27`) | `actuate/lcd.py` |
 | Pan / Tilt servo | PCA9685 **ch 1 / ch 0** | `ServoConfig` |
 | Water pump (was "main laser") | GPIO **BCM 26** (relay/MOSFET + flyback) | `actuate/pump.py` |
-| Aux laser / aim marker | GPIO **BCM 27** (opt-in) | `actuate/indicators.py` |
+| Aux laser / aim marker | GPIO **BCM 24** — **rewired from v1's BCM27** (owner, 2026-06-29) | `actuate/indicators.py` |
 | Status LED | GPIO **BCM 23** | `actuate/indicators.py` |
 | IR receiver — **CONFIRMED** (BCM17/GPIO17/**pin 11**) | GPIO **BCM 17** (`dtoverlay=gpio-ir`; bare VS1838B + RC filter, breakout lost; owner-locked pin order SIGNAL·GND·VCC) | `app/remote.py` |
 
-Free pins besides BCM17: 4/5/6/12/13/16/18/19/20/21/22/24/25 + SPI block. BCM 2/3 = I2C; **17 (IR)**/23/26/27 in use.
+Free pins besides BCM17: 4/5/6/12/13/16/18/19/20/21/22/25 + SPI block (**BCM27 freed by the aux rewire**). BCM 2/3 = I2C; **17 (IR)**/23/24 (aux)/26 in use.
 
 ### Step 1.13 — LCD lifecycle display *(done on Mac; verify on Pi)*
 - **Goal:** surface useful info throughout the run on the 1602A (16×2): boot + LAN IP, then per state —
@@ -302,7 +302,7 @@ Free pins besides BCM17: 4/5/6/12/13/16/18/19/20/21/22/24/25 + SPI block. BCM 2/
   at `app.lcd_refresh_hz` and never stalls the control loop; LCD I2C errors are swallowed.
 
 ### Step 1.14 — Status LED + aux marker *(done on Mac; verify on Pi)*
-- **Goal:** drive v1's BCM23 status LED (on while not SAFE) and BCM27 aux laser as an **opt-in** aim
+- **Goal:** drive v1's BCM23 status LED (on while not SAFE) and the BCM24 aux laser (rewired from v1's BCM27) as an **opt-in** aim
   marker (default off — laser safety; `app.aux_marker_enabled`). Fail-safe, off on disarm.
 - **Files:** `actuate/indicators.py` (`GpioOutput`, `gpiozero.LED` like v1); toggled in `ControlLoop`.
 - **Validation:** unit-tested status-LED-tracks-state + fail-safe; on-Pi confirm BCM23/27 behavior.

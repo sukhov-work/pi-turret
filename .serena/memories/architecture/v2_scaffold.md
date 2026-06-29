@@ -42,7 +42,7 @@ re-read files before trusting specifics. (Related: `mem:core`, `mem:tech_stack`.
   lazy); warns if model_path doesn't end `_edgetpu.tflite`.
 - **Operator I/O (reuses v1 pins — see `mem:architecture/wiring`):** `actuate/lcd.py::StatusLcd`
   (fail-safe device) + `app/display.py` (`format_lcd_lines` pure + `LcdReporter` low-rate thread) =
-  lifecycle LCD. `actuate/indicators.py::GpioOutput` = status LED (BCM23) + opt-in aux marker (BCM27),
+  lifecycle LCD. `actuate/indicators.py::GpioOutput` = status LED (BCM23) + opt-in aux marker (BCM24, rewired from v1's BCM27),
   toggled in `ControlLoop`. `app/remote.py` = PROPOSED IR remote seam (evdev/rc-core, lazy) +
   `RemoteConfig`. Pipeline tracks fps + shots for the LCD. All fail-safe; OFF on disarm.
 

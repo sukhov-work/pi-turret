@@ -178,7 +178,7 @@ Non-blocking: pump on → timer → off → COOLDOWN, tracking throughout.
 | Param | Default | Description |
 |---|---|---|
 | `pump_gpio_bcm` | `26` | `[restart][safety]` BCM pin to the water-pump relay/MOSFET (v1's "main laser" pin). **Always** via relay/MOSFET + flyback diode, never a bare GPIO. Binds at start. |
-| `aux_gpio_bcm` | `27` | `[restart]` BCM pin for the aux laser/marker (v1). Drives the opt-in/manual aim marker. |
+| `aux_gpio_bcm` | `24` | `[restart]` BCM pin for the aux laser/marker (rewired to its own pin, was v1's BCM27). Drives the opt-in/manual aim marker. |
 | `status_led_gpio_bcm` | `23` | `[restart]` BCM pin for the status LED (v1). Lit while ARMED. |
 | `active_high` | `true` | `[restart][safety]` Relay energizes on HIGH (`true`) or LOW. Wrong polarity = pump on when it should be off. Verify — it controls water. |
 
@@ -199,7 +199,7 @@ Non-blocking: pump on → timer → off → COOLDOWN, tracking throughout.
 | `lcd_enabled` | `true` | Drive the 1602A I2C LCD (boot/IP, state, target, aim err, fps, shots). Fail-safe — LCD errors never stop control. |
 | `lcd_refresh_hz` | `4.0` | LCD re-render rate; deliberately low so the slow I2C write (own thread) never blocks control. |
 | `status_led_enabled` | `true` | Drive the BCM23 status LED (lit while ARMED/not-SAFE). |
-| `aux_marker_enabled` | `false` | Allow the BCM27 aux laser to **auto**-light as an aim marker during AIMING/FIRING (opt-in, laser safety). The manual Marker On/Off buttons override this regardless. |
+| `aux_marker_enabled` | `false` | Allow the BCM24 aux laser to **auto**-light as an aim marker during AIMING/FIRING (opt-in, laser safety). The manual Marker On/Off buttons override this regardless. |
 
 ## stream — USB-webcam MJPEG (human spotter view, separate process)
 A `mjpg-streamer` subprocess does UVC hardware-MJPEG passthrough so the Pi spends **no

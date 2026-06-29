@@ -2,7 +2,8 @@
 
 The owner does NOT want the breadboard/relays/diodes/pins rewired without a serious
 reason. **Escalate before any rewire.** New hardware is additive on FREE pins only,
-and still flag it for confirmation. v2 reuses every v1 pin exactly.
+and still flag it for confirmation. v2 reuses every v1 pin **except the owner-rewired
+aux laser/marker** (moved to its own pin **BCM24** on 2026-06-29; v1 code still drives BCM27).
 
 Verified from source: `v1/TurretHandler.py:40-51`, `v1/PCA9685.py:32`. (Related: `mem:core`,
 `mem:architecture/v2_scaffold`.)
@@ -15,11 +16,11 @@ Verified from source: `v1/TurretHandler.py:40-51`, `v1/PCA9685.py:32`. (Related:
 | Pan servo (MG996R) | PCA9685 **ch 1** | `ServoConfig.pan_channel` |
 | Tilt servo (MG996R) | PCA9685 **ch 0** | `ServoConfig.tilt_channel` |
 | Water pump (v1 "main laser") | GPIO **BCM 26** (relay/MOSFET + flyback) | `actuate/pump.py` |
-| Aux laser / aim marker | GPIO **BCM 27** (opt-in, `gpiozero.LED`) | `actuate/indicators.py` |
+| Aux laser / aim marker | GPIO **BCM 24** — rewired from v1's BCM27 (opt-in, `gpiozero.LED`) | `actuate/indicators.py` |
 | Status LED | GPIO **BCM 23** (`gpiozero.LED`) | `actuate/indicators.py` |
-| IR receiver (PROPOSED) | GPIO **BCM 17** (free; CONFIRM before wiring) | `app/remote.py` |
+| IR receiver (CONFIRMED) | GPIO **BCM 17** / pin 11 (`dtoverlay=gpio-ir`) | `app/remote.py` |
 
-Free pins besides BCM17: 4/5/6/12/13/16/18/19/20/21/22/24/25 + SPI block. BCM 2/3 = I2C; 23/26/27 used.
+Free pins besides BCM17: 4/5/6/12/13/16/18/19/20/21/22/25 + SPI block (**BCM27 freed by the aux rewire**). BCM 2/3 = I2C; 17/23/24/26 used.
 **v1 has NO GPIO inputs** — so an IR receiver is purely additive.
 
 ## LCD usage (v2 extends v1)

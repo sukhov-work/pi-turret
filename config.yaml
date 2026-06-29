@@ -100,7 +100,7 @@ servo:
 
 pump:
   pump_gpio_bcm: 26               # via relay/MOSFET + flyback diode, never bare GPIO
-  aux_gpio_bcm: 27
+  aux_gpio_bcm: 24                # aux laser/marker — rewired to its own pin (was v1's BCM27)
   status_led_gpio_bcm: 23
   active_high: true
 
@@ -126,7 +126,7 @@ app:
   lcd_enabled: true               # 1602A on I2C bus 1 (rpi_lcd), shares bus with PCA9685
   lcd_refresh_hz: 4.0
   status_led_enabled: true        # BCM23
-  aux_marker_enabled: false       # BCM27 aux laser as aim marker — OPT-IN (laser safety)
+  aux_marker_enabled: false       # BCM24 aux laser as aim marker — OPT-IN (laser safety)
 
 # IR remote — PROPOSED additive hardware (no v1 GPIO inputs). Confirm gpio_bcm and
 # add `dtoverlay=gpio-ir,gpio_pin=17` to /boot/config.txt before wiring. See plan 1.15.

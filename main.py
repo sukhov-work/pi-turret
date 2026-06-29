@@ -5,7 +5,7 @@ LCD, status/aux indicators), wires the threaded pipeline, optionally starts the 
 remote, and registers disarm handlers so any exit converges to the safe state
 (servos centered + relaxed, pump off, status LED off, LCD shows SAFE).
 
-Reuses v1's exact wiring (BCM26 pump, BCM27 aux, BCM23 status LED, I2C bus 1 for
+Reuses v1's wiring except the rewired aux (BCM26 pump, BCM24 aux laser/marker, BCM23 status LED, I2C bus 1 for
 PCA9685 @ 0x40 + the LCD). All hardware construction is lazy/guarded.
 
 Run on the Pi:  python3 main.py

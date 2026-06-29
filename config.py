@@ -129,7 +129,7 @@ class ServoConfig:
 @dataclass
 class PumpConfig:
     pump_gpio_bcm: int = 26                  # v1 "main laser" pin -> water pump (via relay/MOSFET)
-    aux_gpio_bcm: int = 27
+    aux_gpio_bcm: int = 24                    # aux laser/marker — rewired to its own pin (was v1's BCM27)
     status_led_gpio_bcm: int = 23
     active_high: bool = True
 
@@ -163,7 +163,7 @@ class AppConfig:
     lcd_enabled: bool = True
     lcd_refresh_hz: float = 4.0
     status_led_enabled: bool = True          # BCM23 (v1 status LED): on while ARMED/scanning
-    aux_marker_enabled: bool = False         # BCM27 (v1 aux laser): OPT-IN aim marker, off by default
+    aux_marker_enabled: bool = False         # BCM24 aux laser/marker (rewired from v1's BCM27): OPT-IN, off by default
 
 
 @dataclass

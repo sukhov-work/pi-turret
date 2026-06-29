@@ -55,12 +55,12 @@ class ControlLoop:
         self.cal = calibration or Calibration.from_config(cfg.aim)
         self._frame_w = float(cfg.camera.capture_width_px)
         self._frame_h = float(cfg.camera.capture_height_px)
-        # Optional indicators (BCM23 status LED, BCM27 aux marker). Fail-safe,
+        # Optional indicators (BCM23 status LED, BCM24 aux marker). Fail-safe,
         # may be None in tests. The aux marker (a laser) is opt-in.
         self._status_led = status_led
         self._aux_marker = aux_marker
         self._aux_enabled = cfg.app.aux_marker_enabled
-        # Manual marker override (boresight/calibration): forces BCM27 on now,
+        # Manual marker override (boresight/calibration): forces BCM24 on now,
         # independent of fire-state. None of the auto behaviour applies while set.
         self._marker_on = False
         self._last_selected: Optional[int] = None
@@ -103,7 +103,7 @@ class ControlLoop:
     def set_marker(self, on: bool) -> bool:
         """Manually force the aux laser marker on/off (boresight/calibration).
 
-        Drives BCM27 immediately and latches; ``on`` overrides the auto behaviour,
+        Drives BCM24 immediately and latches; ``on`` overrides the auto behaviour,
         ``off`` returns to auto (which is OFF unless armed + aiming + opt-in). Reset
         on disarm. Fail-safe: a marker error never propagates.
         """

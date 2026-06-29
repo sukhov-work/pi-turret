@@ -29,15 +29,16 @@ flag it for confirmation.
 | 1602A LCD | I2C bus 1 (`rpi_lcd`, ~`0x27`) | shares the bus with the PCA9685 — no conflict |
 | Pan / Tilt servo | PCA9685 ch **1** / ch **0** | |
 | Water pump (v1 "main laser") | GPIO **BCM 26** | relay/MOSFET + flyback diode, never bare GPIO |
-| Aux laser / aim marker | GPIO **BCM 27** | opt-in (laser safety); `gpiozero.LED` |
+| Aux laser / aim marker | GPIO **BCM 24** (rewired from v1's BCM27) | opt-in (laser safety); `gpiozero.LED` |
 | Status LED | GPIO **BCM 23** | `gpiozero.LED` |
-| IR receiver (PROPOSED) | GPIO **BCM 17** (free; confirm) | additive; `dtoverlay=gpio-ir` |
+| IR receiver (CONFIRMED) | GPIO **BCM 17** / pin 11 | additive; `dtoverlay=gpio-ir` |
 
-Free pins besides BCM17: 4/5/6/12/13/16/18/19/20/21/22/24/25 + the SPI block. BCM 2/3 = I2C; 23/26/27 in use.
+Free pins besides BCM17: 4/5/6/12/13/16/18/19/20/21/22/25 + the SPI block (BCM27 freed by the aux rewire).
+BCM 2/3 = I2C; **17 (IR)**/23/24 (aux)/26 in use.
 
 **LCD + indicators are fail-safe outputs:** an I2C/GPIO error on the LCD or a status/aux indicator must
 be logged and swallowed — a flaky display never stops the turret. Drive the status LED on while not
-SAFE; keep the BCM27 aux laser marker OFF unless explicitly enabled in config.
+SAFE; keep the BCM24 aux laser marker OFF unless explicitly enabled in config.
 
 ## Actuator limits (clamp before every write)
 

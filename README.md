@@ -98,14 +98,14 @@ sudo systemctl stop turret
 dashboards, and the full ops doc live in **`monitoring/`** (start at `monitoring/README.md`); the
 Grafana Cloud token stays in `/etc/alloy/secrets.env` (never committed).
 
-### Wiring (FIXED — reused from v1, do NOT rewire; escalate first)
+### Wiring (reused from v1)
 | Function | Bus / pin |
 |---|---|
 | PCA9685 servo driver | I2C **bus 1** @ `0x40` |
 | 1602A LCD (status display) | I2C **bus 1** (`rpi_lcd`) |
 | Pan / Tilt servo | PCA9685 **ch 1 / ch 0** |
 | Water pump (was v1 "main laser") | GPIO **BCM 26** (via relay/MOSFET + flyback diode) |
-| Aux laser / aim marker (opt-in) | GPIO **BCM 27** |
+| Aux laser / aim marker (opt-in) | GPIO **BCM 24** (rewired from v1's BCM27) |
 | Status LED | GPIO **BCM 23** |
 | IR receiver (PROPOSED, additive) | GPIO **BCM 17** (free pin; confirm before wiring) |
 
