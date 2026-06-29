@@ -110,3 +110,40 @@ def test_status_led_tracks_armed_state():
     loop.tick([])
     assert status.state is False           # SAFE -> status LED off
 
+
+def test_armed_moves_servo_with_tracks():
+    cfg, loop, drv, servo, events = _loop()      # default SEARCHING == armed
+    loop.tick([make_track(track_id=1, cx=0, cy=0)])
+    assert drv.writes != []
+
+
+def test_disarmed_freezes_servo_but_still_reports_aim():
+    cfg, loop, drv, servo, events = _loop()
+    target = make_track(track_id=1, cx=0, cy=0)
+    loop.sm.enter_safe()                          # DISARM
+    drv.writes.clear()
+    tel = loop.tick([target])
+    assert drv.writes == []                       # frozen: no servo motion
+    assert tel.selected_target_id == 1            # but still tracks + reports
+    assert tel.predicted_xy is not None           # where it *would* aim
+
+
+def test_manual_marker_forces_aux_independent_of_state():
+    cfg = Config()
+    cfg.fire.enabled = False
+    drv = FakeDriver()
+    servo = ServoController(drv, cfg.servo)
+    sm = FireStateMachine(cfg.fire)
+    aux = _FakeIndicator()
+    loop = ControlLoop(cfg, servo, TargetSelector(min_target_dwell_frames=1), sm,
+                       aux_marker=aux)
+    loop.tick([])
+    assert aux.state is False                     # opt-in marker: off by default
+    assert loop.set_marker(True) is True
+    assert aux.state is True                       # manual force -> on now
+    sm.enter_safe()
+    loop.tick([])
+    assert aux.state is True                        # stays on while disarmed (boresight)
+    loop.set_marker(False)
+    assert aux.state is False                       # back to auto (off, not aiming)
+

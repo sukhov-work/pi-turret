@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import List
+from typing import List, Optional, Tuple
 
 import numpy as np
 
@@ -26,8 +26,16 @@ logger = logging.getLogger(__name__)
 
 
 class CoralDetector(Detector):
-    def __init__(self, cfg: DetectorConfig):
+    def __init__(self, cfg: DetectorConfig, frame_width_px: Optional[int] = None,
+                 frame_height_px: Optional[int] = None):
         self.cfg = cfg
+        # Full-frame coordinate space the detections map back to (the space the
+        # killzone, scoring, calibration and the tactical canvas all use). The
+        # detector runs on the small lores frame (e.g. 256px) but its output must
+        # land in capture-frame pixels (e.g. 1152px). When unset, falls back to the
+        # input frame's own size (bench/no-camera use).
+        self._frame_width_px = frame_width_px
+        self._frame_height_px = frame_height_px
         if cfg.backend.startswith("coral") and "_edgetpu" not in os.path.basename(cfg.model_path):
             logger.warning("model_path %s has no _edgetpu marker — verify it is the Edge-TPU-"
                            "compiled model, not a plain tflite (which would run on CPU)",
@@ -74,9 +82,10 @@ class CoralDetector(Detector):
             raw = self._interpreter.get_tensor(self._out_index)
             if self._out_scale:  # dequantize INT8 -> float
                 raw = (raw.astype(np.float32) - self._out_zero) * self._out_scale
+            fw, fh = self._frame_dims(frame)
             return decode_v8(
                 raw, input_size_px=self.cfg.input_size_px,
-                frame_width_px=frame.shape[1], frame_height_px=frame.shape[0],
+                frame_width_px=fw, frame_height_px=fh,
                 conf_threshold=self.cfg.conf_threshold,
                 iou_threshold=self.cfg.iou_threshold,
                 num_classes=self.cfg.num_classes,
@@ -86,6 +95,11 @@ class CoralDetector(Detector):
             raise
         except Exception as exc:  # noqa: BLE001
             raise DetectionError("Coral inference failed") from exc
+
+    def _frame_dims(self, frame: np.ndarray) -> Tuple[int, int]:
+        """Full-frame (width, height) the detections map to (configured, else frame)."""
+        return (self._frame_width_px or frame.shape[1],
+                self._frame_height_px or frame.shape[0])
 
     def _preprocess(self, frame: np.ndarray) -> np.ndarray:
         import cv2

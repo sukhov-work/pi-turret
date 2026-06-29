@@ -11,8 +11,9 @@ Real settling/aiming behaviour is Pi-only truth.
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, Optional, Sequence
 
 from aim.calibrate import Calibration, apply_aim_offsets, apply_calibration
 from aim.controller import slew_toward
@@ -24,6 +25,8 @@ from contracts import Track
 from strategy.scoring import score_track
 from strategy.selector import TargetSelector
 from track.predict import predict_lead
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -56,6 +59,10 @@ class ControlLoop:
         self._status_led = status_led
         self._aux_marker = aux_marker
         self._aux_enabled = cfg.app.aux_marker_enabled
+        # Manual marker override (boresight/calibration): forces BCM27 on now,
+        # independent of fire-state. None of the auto behaviour applies while set.
+        self._marker_on = False
+        self._last_selected: Optional[int] = None
 
     def apply_config(self) -> None:
         """Re-apply config that was snapshotted at construction.
@@ -72,23 +79,53 @@ class ControlLoop:
         self.selector.hysteresis = self.cfg.strategy.switch_hysteresis
         self.selector.min_dwell = self.cfg.strategy.min_target_dwell_frames
 
+    def set_marker(self, on: bool) -> bool:
+        """Manually force the aux laser marker on/off (boresight/calibration).
+
+        Drives BCM27 immediately and latches; ``on`` overrides the auto behaviour,
+        ``off`` returns to auto (which is OFF unless armed + aiming + opt-in). Reset
+        on disarm. Fail-safe: a marker error never propagates.
+        """
+        self._marker_on = bool(on)
+        if self._aux_marker is not None:
+            self._aux_marker.set(self._marker_value(self.sm.state))
+        logger.info("aux marker %s (manual)", "ON" if on else "off")
+        return self._marker_on
+
+    def _marker_value(self, state: "FireState") -> bool:
+        return self._marker_on or (self._aux_enabled
+                                   and state in (FireState.AIMING, FireState.FIRING))
+
     def _update_indicators(self) -> None:
         state = self.sm.state
         if self._status_led is not None:
             self._status_led.set(state is not FireState.SAFE)
         if self._aux_marker is not None:
-            self._aux_marker.set(self._aux_enabled
-                                 and state in (FireState.AIMING, FireState.FIRING))
+            self._aux_marker.set(self._marker_value(state))
+
+    def _note_target(self, target_id: Optional[int]) -> None:
+        """Log target acquisition / switch / loss at INFO (edges only, no spam)."""
+        if target_id == self._last_selected:
+            return
+        if target_id is None:
+            logger.info("target lost (#%s)", self._last_selected)
+        elif self._last_selected is None:
+            logger.info("target acquired #%s", target_id)
+        else:
+            logger.info("target switch #%s -> #%s", self._last_selected, target_id)
+        self._last_selected = target_id
 
     def tick(self, tracks: Sequence[Track]) -> Telemetry:
         tracks = list(tracks)
+        armed = self.sm.state is not FireState.SAFE
+        pan_now, tilt_now = self.servo.last_angle(Axis.PAN), self.servo.last_angle(Axis.TILT)
         if not tracks:
             self.selector.select([])
             self.sm.step(FireContext(has_target=False))
+            self._note_target(None)
             self._update_indicators()
             return Telemetry(self.sm.state, 0, None, float("inf"), None,
-                             self.servo.last_angle(Axis.PAN),
-                             self.servo.last_angle(Axis.TILT), False, False)
+                             pan_now, tilt_now, False, False)
 
         by_id: Dict[int, Track] = {t.id: t for t in tracks}
         scored = [(t.id, score_track(t, self.cfg.killzone, self.cfg.strategy,
@@ -97,11 +134,12 @@ class ControlLoop:
         target = by_id.get(target_id)
         if target is None:
             self.sm.step(FireContext(has_target=False))
+            self._note_target(None)
             self._update_indicators()
             return Telemetry(self.sm.state, len(tracks), None, float("inf"), None,
-                             self.servo.last_angle(Axis.PAN),
-                             self.servo.last_angle(Axis.TILT), False, False)
+                             pan_now, tilt_now, False, False)
 
+        self._note_target(target_id)
         # Predict the lead point and aim there (calibration feed-forward).
         px, py = predict_lead(target, self.cfg.predict.lead_time_s, self.cfg.predict.fps)
         pan_t, tilt_t = apply_aim_offsets(
@@ -109,11 +147,17 @@ class ControlLoop:
             parallax_pan_deg=self.cfg.aim.parallax_pan_deg,
             drop_tilt_deg=self.cfg.aim.drop_tilt_deg,
         )
-        max_step = self.cfg.controller.max_step_deg
-        pan_cmd = self.servo.set_angle(
-            Axis.PAN, slew_toward(self.servo.last_angle(Axis.PAN), pan_t, max_step))
-        tilt_cmd = self.servo.set_angle(
-            Axis.TILT, slew_toward(self.servo.last_angle(Axis.TILT), tilt_t, max_step))
+        # Servos move ONLY when armed. Disarmed (SAFE) freezes the turret so manual
+        # jog / Center hold and it never chases false positives — telemetry still
+        # reports where it *would* aim.
+        if armed:
+            max_step = self.cfg.controller.max_step_deg
+            pan_cmd = self.servo.set_angle(
+                Axis.PAN, slew_toward(pan_now, pan_t, max_step))
+            tilt_cmd = self.servo.set_angle(
+                Axis.TILT, slew_toward(tilt_now, tilt_t, max_step))
+        else:
+            pan_cmd, tilt_cmd = pan_now, tilt_now
 
         aim_error_px = distance_to_center_px(px, py, self.cfg.killzone)
         in_kz = is_in_kill_zone(px, py, self.cfg.killzone)

@@ -7,6 +7,9 @@ last_servo_state.txt
 .venv-v2/
 .pytest_cache/
 /dataset/
+# machine-written config overlay (calibration / home / live tuning), per-box
+/config.local.yaml
+/config.local.yaml.tmp
 
 /.claude/.env
 /.claude/claude-docs/NEXT_SESSION_PROMPT.md

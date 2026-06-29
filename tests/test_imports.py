@@ -18,6 +18,7 @@ MODULES = [
     "actuate.lcd", "actuate.indicators",
     "app", "app.statemachine", "app.control", "app.pipeline",
     "app.annotate", "app.snapshots", "app.display", "app.remote",
+    "app.streamer", "app.web", "app.debugview",
 ]
 
 

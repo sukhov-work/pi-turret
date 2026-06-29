@@ -24,6 +24,12 @@ class CameraConfig:
     lores_format: str = "YUV420"             # Pi 4 lores MUST be YUV420
     fixed_focus: bool = True                 # no AF hunting on a moving target
     lens_position: float = 4.0               # diopters; tune to engagement range
+    # Software correction for a physically rotated module (e.g. FPC ribbon exits
+    # to the side). 0/90/180/270 only; applied to the detection frame at capture
+    # (np.rot90) so the whole pipeline shares one consistent pixel space. Prefer a
+    # physical remount (ribbon at the bottom); this is the fallback. Square frames
+    # so dims are unchanged.
+    rotation_deg: int = 0
 
 
 @dataclass
@@ -114,8 +120,10 @@ class ServoConfig:
     # keep v1's verified mapping and a wide hard guard. Re-measure on the Pi.
     pulse_min_us: float = 500.0
     pulse_max_us: float = 2500.0
-    home_pan_deg: float = 31.0
-    home_tilt_deg: float = 23.0
+    # "Center"/boot home. Defaults to geometric mid-travel; replace with the real
+    # forward-level pose via the calibration UI (Set Home) and persist it.
+    home_pan_deg: float = 26.0
+    home_tilt_deg: float = 15.0
 
 
 @dataclass
@@ -145,6 +153,12 @@ class AppConfig:
     stream_source: str = "usb"               # usb (default) | picam_annotated (debug)
     web_port: int = 8001
     log_level: str = "INFO"
+    # Detection-cam debug video: serves the raw lores frame the detector sees as a
+    # low-rate JPEG (the web canvas draws boxes/aim/HUD on top). OFF by default —
+    # JPEG encode competes with detection; gate it on while debugging only.
+    detection_video_enabled: bool = False
+    detection_video_max_fps: float = 5.0     # server-side encode-rate cap
+    detection_video_quality: int = 70        # JPEG quality (1-100)
     # 1602A LCD on I2C bus 1 (rpi_lcd default addr, alongside the PCA9685 @ 0x40).
     lcd_enabled: bool = True
     lcd_refresh_hz: float = 4.0
@@ -253,6 +267,8 @@ class Config:
             raise ConfigError("servo clamp min must be < max")
         if s.pulse_min_us >= s.pulse_max_us:
             raise ConfigError("servo pulse_min_us must be < pulse_max_us")
+        if self.camera.rotation_deg not in (0, 90, 180, 270):
+            raise ConfigError("camera.rotation_deg must be one of 0, 90, 180, 270")
         d = self.detector
         for n in ("conf_threshold", "iou_threshold"):
             v = getattr(d, n)
@@ -283,22 +299,60 @@ def _build_section(section_cls: Any, name: str, data: Dict[str, Any]) -> Any:
     return section_cls(**data)
 
 
-def load_config(path: str = "config.yaml") -> Config:
-    """Load config from a YAML file layered over defaults.
+def _load_yaml(path: str) -> Dict[str, Any]:
+    """Read a YAML mapping. Missing file / no PyYAML -> {} (Mac tests don't need yaml)."""
+    if not path or not os.path.exists(path):
+        return {}
+    try:
+        import yaml  # type: ignore
+    except ImportError:
+        return {}
+    with open(path, "r") as fh:
+        loaded = yaml.safe_load(fh) or {}
+    if not isinstance(loaded, dict):
+        raise ConfigError(f"{path} must contain a top-level mapping")
+    return loaded
 
-    Missing file -> defaults. PyYAML missing -> defaults (with the file ignored),
-    so pure-logic Mac tests never hard-require the yaml dependency.
+
+def load_config(path: str = "config.yaml",
+                local_path: str = "config.local.yaml") -> Config:
+    """Load config: typed defaults <- ``config.yaml`` (documented base) <- ``config.local.yaml``.
+
+    ``config.local.yaml`` is the machine-written overlay (calibration, home, live
+    tuning saved from the web UI); it is git-ignored so each box keeps its own and a
+    deploy never clobbers it. Per-key merge, so editing the base still affects keys
+    the overlay didn't touch.
     """
-    data: Dict[str, Any] = {}
-    if path and os.path.exists(path):
-        try:
-            import yaml  # type: ignore
-        except ImportError:
-            yaml = None  # type: ignore
-        if yaml is not None:
-            with open(path, "r") as fh:
-                loaded = yaml.safe_load(fh) or {}
-            if not isinstance(loaded, dict):
-                raise ConfigError(f"{path} must contain a top-level mapping")
-            data = loaded
+    data = _load_yaml(path)
+    for section, vals in _load_yaml(local_path).items():
+        if isinstance(vals, dict) and isinstance(data.get(section), dict):
+            data[section].update(vals)
+        else:
+            data[section] = vals
     return Config.from_dict(data)
+
+
+def save_local_config(cfg: Config, local_path: str = "config.local.yaml",
+                      base_path: str = "config.yaml") -> Dict[str, Any]:
+    """Persist only what differs from the base to ``config.local.yaml`` (atomic).
+
+    Writing the delta (not the whole config) keeps the overlay small and lets later
+    base edits still apply to untouched keys. Returns the written delta.
+    """
+    try:
+        import yaml  # type: ignore
+    except ImportError as exc:
+        raise ConfigError("PyYAML is required to save config (pip install PyYAML)") from exc
+    cfg.validate()
+    base = Config.from_dict(_load_yaml(base_path)).to_dict()
+    delta: Dict[str, Any] = {}
+    for section, vals in cfg.to_dict().items():
+        base_vals = base.get(section, {})
+        diff = {k: v for k, v in vals.items() if base_vals.get(k) != v}
+        if diff:
+            delta[section] = diff
+    tmp = local_path + ".tmp"
+    with open(tmp, "w") as fh:
+        yaml.safe_dump(delta, fh, default_flow_style=False, sort_keys=False)
+    os.replace(tmp, local_path)
+    return delta

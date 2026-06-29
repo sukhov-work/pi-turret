@@ -128,6 +128,9 @@ def build_pipeline(cfg: Config):
     driver.setup(cfg.servo.pwm_freq_hz)
     servo = ServoController(driver, cfg.servo)
     servo.center()
+    logger.info("servo bus ready (I2C%d @ 0x%02x); centered to home (pan=%.1f tilt=%.1f deg)",
+                cfg.servo.i2c_bus, cfg.servo.i2c_address,
+                cfg.servo.home_pan_deg, cfg.servo.home_tilt_deg)
 
     pump = Pump(gpio_bcm=cfg.pump.pump_gpio_bcm, active_high=cfg.pump.active_high)
     status_led = GpioOutput(cfg.pump.status_led_gpio_bcm, enabled=cfg.app.status_led_enabled)
@@ -140,9 +143,17 @@ def build_pipeline(cfg: Config):
     control = ControlLoop(cfg, servo, selector, sm,
                           status_led=status_led, aux_marker=aux_marker)
 
-    detector = CoralDetector(cfg.detector)
+    detector = CoralDetector(cfg.detector,
+                             frame_width_px=cfg.camera.capture_width_px,
+                             frame_height_px=cfg.camera.capture_height_px)
+    logger.info("detector ready: %s model=%s input=%dpx -> frame=%dpx",
+                cfg.detector.backend, cfg.detector.model_path,
+                cfg.detector.input_size_px, cfg.camera.capture_width_px)
     capture = PiCamCapture(cfg.camera, cfg.detector.input_size_px)
     capture.start()
+    logger.info("camera started (%s, %dpx detection frame, rotation=%d deg)",
+                cfg.camera.detection_source, cfg.detector.input_size_px,
+                cfg.camera.rotation_deg)
     tracker = IouTracker(cfg.tracker.iou_match_threshold, cfg.tracker.max_age_frames,
                          cfg.tracker.min_hits, cfg.tracker.velocity_smoothing)
 
@@ -160,6 +171,7 @@ def build_pipeline(cfg: Config):
         logger.info("disarming -> safe state")
         try:
             sm.enter_safe()
+            control.set_marker(False)
             pump.close()
             status_led.off()
             aux_marker.off()
@@ -187,11 +199,14 @@ def main() -> None:
     streamer = UsbStreamer(cfg.stream)
     atexit.register(streamer.stop)
     if cfg.app.stream_source == "usb":
+        logger.info("usb stream: binary=%s device=%s", cfg.stream.binary, cfg.stream.device)
         streamer.start()
 
     ip = _log_reachable_endpoints(cfg.app.web_port, cfg.stream.port)
     reporter.message("pi-turret v2", f"{ip}:{cfg.app.web_port}")
-    logger.info("starting pipeline (fire.enabled=%s)", cfg.fire.enabled)
+    control.sm.enter_safe()  # boot DISARMED: no servo motion until the operator arms
+    logger.info("starting pipeline DISARMED (fire.enabled=%s) — press Arm to engage",
+                cfg.fire.enabled)
     pipeline.start()
     remote.start()
     start_web_thread(TurretWebController(cfg, pipeline, control, streamer=streamer),

@@ -116,8 +116,15 @@ class Pipeline:
             tracks = self.latest_tracks.get() or []
             try:
                 telemetry = self.control.tick(tracks)
+                if telemetry.state is not self._prev_state:
+                    logger.info("state %s -> %s",
+                                self._prev_state.value if self._prev_state else "init",
+                                telemetry.state.value)
                 if telemetry.state is FireState.FIRING and self._prev_state is not FireState.FIRING:
                     self.shots += 1            # count on the rising edge into FIRING
+                    logger.info("FIRE #%s (shot %d, aim_err=%.0fpx)",
+                                telemetry.selected_target_id, self.shots,
+                                telemetry.aim_error_px)
                 self._prev_state = telemetry.state
                 self.latest_telemetry.put(telemetry)
             except Exception:

@@ -78,15 +78,23 @@
   td { padding:3px 5px; border-bottom:1px solid #11190f; }
   tr.sel td { color:var(--grn); }
 
-  /* tactical canvas */
-  .tac-wrap { position:relative; aspect-ratio:1/1; width:100%; background:var(--panel2);
-              border:1px solid var(--line); }
-  #tactical { width:100%; height:100%; display:block; }
-  .tac-cap { position:absolute; top:6px; left:8px; font-size:9.5px; color:var(--dim); letter-spacing:.1em; }
+  /* video feeds: detection + usb side by side, capped so a 4K screen still fits */
+  .feeds { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  @media (max-width:760px){ .feeds{ grid-template-columns:1fr; } }
+  .tac-wrap { position:relative; aspect-ratio:1/1; width:100%; max-width:480px; margin:0 auto;
+              background:#050706; border:1px solid var(--line); overflow:hidden; }
+  .tac-img { position:absolute; inset:0; width:100%; height:100%; object-fit:contain;
+             image-rendering:pixelated; background:#000; display:none; }
+  #tactical { position:absolute; inset:0; width:100%; height:100%; display:block; }
+  .tac-cap { position:absolute; top:6px; left:8px; font-size:9.5px; color:var(--dim);
+             letter-spacing:.1em; z-index:2; text-shadow:0 0 4px #000; }
   .tac-cap.r { left:auto; right:8px; }
-
-  #vis { width:100%; display:block; border:1px solid var(--line); background:var(--panel2); min-height:60px; }
-  .vis-off { padding:18px; text-align:center; color:var(--dim); font-size:11px; border:1px dashed var(--line); }
+  .vis-off { position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+             text-align:center; color:var(--dim); font-size:11px; }
+  .ovr { display:flex; flex-wrap:wrap; gap:10px 12px; margin-top:8px; font-size:10.5px; color:var(--dim); }
+  .ovr label { display:flex; align-items:center; gap:4px; cursor:pointer; }
+  button.mini { padding:2px 8px; font-size:10px; }
+  button.mini.go { border-color:var(--grn-dim); color:var(--grn); }
 
   details { border-top:1px solid var(--line); margin-top:6px; }
   summary { cursor:pointer; color:var(--dim); padding:6px 0 4px; font-size:10.5px; }
@@ -146,28 +154,72 @@
         <button class="warn" onclick="streamCmd('stream_off')">Feed&nbsp;Off</button>
       </div>
       <div class="grid2" style="margin-top:7px">
-        <button onclick="cmd('enable_aux')">Marker&nbsp;On</button>
-        <button onclick="cmd('disable_aux')">Marker&nbsp;Off</button>
+        <button onclick="cmd('marker_on')">Marker&nbsp;On</button>
+        <button onclick="cmd('marker_off')">Marker&nbsp;Off</button>
       </div>
+    </div>
+
+    <div class="card">
+      <h2 class="up">Calibrate <span class="r" id="calcount">0 pts</span></h2>
+      <div class="ovr" style="margin:0 0 8px">
+        <span>cam rot</span>
+        <button class="mini" id="rot0" onclick="setRot(0)">0&deg;</button>
+        <button class="mini" id="rot90" onclick="setRot(90)">90&deg;</button>
+        <button class="mini" id="rot180" onclick="setRot(180)">180&deg;</button>
+        <button class="mini" id="rot270" onclick="setRot(270)">270&deg;</button>
+      </div>
+      <div class="grid2">
+        <button onclick="cal('set_home')">Set&nbsp;Home</button>
+        <button id="pickbtn" onclick="togglePick()">Pick:&nbsp;off</button>
+      </div>
+      <div class="grid2" style="margin-top:7px">
+        <button onclick="cal('clear')">Clear&nbsp;Pts</button>
+        <button class="go" onclick="cal('fit')">Fit&nbsp;&amp;&nbsp;Apply</button>
+      </div>
+      <details style="margin-top:6px" class="tune">
+        <summary>Travel limits</summary>
+        <label><span>pan&nbsp;min</span><input type="number" step="any" id="lim_pan_min_deg"></label>
+        <label><span>pan&nbsp;max</span><input type="number" step="any" id="lim_pan_max_deg"></label>
+        <label><span>tilt&nbsp;min</span><input type="number" step="any" id="lim_tilt_min_deg"></label>
+        <label><span>tilt&nbsp;max</span><input type="number" step="any" id="lim_tilt_max_deg"></label>
+        <button onclick="applyLimits()">Apply Limits</button>
+      </details>
+      <button class="go" style="margin-top:7px;width:100%" onclick="cal('save')">Save&nbsp;Config</button>
+      <div class="disabled-note" style="margin-top:6px">Disarm, enable video, jog onto a fixed
+        target, then Pick &amp; click it on DET&#8209;CAM. 3+ spread points &rarr; Fit &amp; Apply &rarr; Save.</div>
     </div>
 
     <div class="card"><div id="log">system idle</div></div>
   </div>
 
-  <!-- CENTER: tactical display + visual feed -->
+  <!-- CENTER: detection + usb feeds, side by side -->
   <div>
-    <div class="card">
-      <h2 class="up">Tactical &mdash; Detection Frame</h2>
-      <div class="tac-wrap">
-        <canvas id="tactical" width="600" height="600"></canvas>
-        <span class="tac-cap up">DET-CAM</span>
-        <span class="tac-cap r up" id="kzcap">KZ</span>
+    <div class="feeds">
+      <div class="card">
+        <h2 class="up">Tactical &mdash; Detection
+          <span class="r"><button class="mini" id="vidbtn" onclick="toggleVideo()">video off</button></span>
+        </h2>
+        <div class="tac-wrap">
+          <img id="detvid" class="tac-img" alt="">
+          <canvas id="tactical" width="600" height="600"></canvas>
+          <span class="tac-cap up">DET-CAM</span>
+          <span class="tac-cap r up" id="kzcap">KZ</span>
+        </div>
+        <div class="ovr">
+          <label><input type="checkbox" id="ov_boxes" checked>boxes</label>
+          <label><input type="checkbox" id="ov_aim" checked>aim</label>
+          <label><input type="checkbox" id="ov_grid" checked>grid</label>
+          <label><input type="checkbox" id="ov_hud" checked>hud</label>
+        </div>
       </div>
-    </div>
-    <div class="card">
-      <h2 class="up">Visual &mdash; USB Feed</h2>
-      <img id="vis" alt="" style="display:none">
-      <div class="vis-off" id="visoff">FEED OFFLINE &mdash; press FEED ON</div>
+      <div class="card">
+        <h2 class="up">Visual &mdash; USB Feed</h2>
+        <div class="tac-wrap">
+          <img id="vis" class="tac-img" alt="">
+          <div class="vis-off" id="visoff">FEED OFFLINE &mdash; press FEED ON</div>
+          <span class="tac-cap up">USB-CAM</span>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -193,6 +245,7 @@
 const $ = (id) => document.getElementById(id);
 const STATE_CLASS = { safe:"", searching:"on", tracking:"on", aiming:"warn", firing:"hot", cooldown:"warn" };
 let SNAP = {}, lastOk = 0;
+let videoOn = false, detvidTimer = null;
 
 function log(t, ok){ const e=$("log"); e.textContent=t; e.style.color = ok===false ? "var(--red)" : "var(--dim)"; }
 
@@ -206,23 +259,84 @@ async function cmd(c){ const d=await post("/api/cmd",c,false); log(d.error||("CM
 async function jog(c){ const d=await post("/api/control-cmd",c,false); log(d.error||("SLEW "+c.toUpperCase()+(d.angle_deg!=null?" -> "+d.angle_deg+"°":"")), d.ok); }
 async function streamCmd(c){ const d=await post("/api/cmd",c,false); log(d.error||("FEED "+c.toUpperCase()), d.ok); pollNow(); }
 
+// --- detection-cam debug video (raw lores JPEG under the canvas overlay) ---
+async function toggleVideo(){
+  videoOn=!videoOn;
+  const d=await post("/api/cmd", videoOn?"detect_video_on":"detect_video_off", false);
+  applyVideoState(); log(d.error||("DET VIDEO "+(videoOn?"ON":"OFF")), d.ok);
+}
+function applyVideoState(){
+  const b=$("vidbtn"); b.textContent=videoOn?"video on":"video off"; b.classList.toggle("go",videoOn);
+  const img=$("detvid");
+  if(videoOn){ img.style.display="block"; startDetvid(); }
+  else { stopDetvid(); img.style.display="none"; img.removeAttribute("src"); }
+}
+function startDetvid(){
+  if(detvidTimer) return;
+  detvidTimer=setInterval(()=>{                    // load via a probe so a 204 keeps the last frame
+    if(document.hidden) return;
+    const probe=new Image();
+    probe.onload=()=>{ $("detvid").src=probe.src; };
+    probe.src="/api/detect-frame.jpg?t="+Date.now();
+  }, 220);
+}
+function stopDetvid(){ if(detvidTimer){ clearInterval(detvidTimer); detvidTimer=null; } }
+function ovr(){ return { boxes:$("ov_boxes").checked, aim:$("ov_aim").checked,
+                         grid:$("ov_grid").checked, hud:$("ov_hud").checked }; }
+
+// --- calibration (set home, travel limits, pixel<->angle fit, persist) ---
+let calMode=false, FRAME={w:1152,h:1152};
+async function cal(action,payload){
+  const d=await post("/api/calibrate",{action,payload:payload||{}},true);
+  if(d.samples!=null) $("calcount").textContent=d.samples+" pts";
+  const msg = action==="fit"&&d.ok ? "CAL FITTED" :
+              action==="save"&&d.ok ? "CONFIG SAVED" :
+              action==="set_home"&&d.ok ? "HOME SET "+(d.home||[]).map(x=>x+"°").join("/") :
+              "CAL "+action.toUpperCase();
+  log(d.error||msg, d.ok!==false);
+  if(d.ok && (action==="fit"||action==="save"||action==="set_home")) loadConfig();
+}
+function togglePick(){ calMode=!calMode; const b=$("pickbtn");
+  b.textContent="Pick: "+(calMode?"on":"off"); b.classList.toggle("go",calMode); }
+async function setRot(d){
+  const r=await post("/api/calibrate",{action:"set_rotation",payload:{rotation_deg:d}},true);
+  log(r.error||("CAM ROT "+d+"°"), r.ok!==false);
+}
+async function applyLimits(){
+  const p={}; ["pan_min_deg","pan_max_deg","tilt_min_deg","tilt_max_deg"].forEach(k=>{
+    const v=$("lim_"+k).value; if(v!=="") p[k]=parseFloat(v); });
+  const d=await post("/api/calibrate",{action:"set_limits",payload:p},true);
+  log(d.error||"LIMITS SET", d.ok!==false);
+}
+$("tactical").addEventListener("click", async (e)=>{
+  if(!calMode) return;
+  const c=$("tactical"), rect=c.getBoundingClientRect();
+  const cx=(e.clientX-rect.left)/rect.width*FRAME.w, cy=(e.clientY-rect.top)/rect.height*FRAME.h;
+  const d=await post("/api/calibrate",{action:"add_sample",payload:{cx,cy}},true);
+  if(d.samples!=null) $("calcount").textContent=d.samples+" pts";
+  log(d.error||("PT @ "+Math.round(cx)+","+Math.round(cy)+" pan/tilt "+(d.last?d.last.pan+"/"+d.last.tilt:"")), d.ok!==false);
+});
+
 function setTag(el, on, txt, kind){ el.textContent=txt; el.className="tag up"+(on?(" "+(kind||"on")):""); }
 function fmt(v,u){ return v==null ? "--" : (typeof v==="number" ? (Math.round(v*100)/100)+(u||"") : v); }
 
 function drawTactical(t){
   const c=$("tactical"), ctx=c.getContext("2d"), W=c.width, H=c.height;
   const fw=(t.frame&&t.frame.w)||1152, fh=(t.frame&&t.frame.h)||1152;
-  const sx=W/fw, sy=H/fh;
-  ctx.clearRect(0,0,W,H); ctx.fillStyle="#0a0e0c"; ctx.fillRect(0,0,W,H);
-  // grid
-  ctx.strokeStyle="#111a14"; ctx.lineWidth=1;
-  for(let i=1;i<8;i++){ const x=W*i/8, y=H*i/8;
-    ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
-  // center reticle
-  ctx.strokeStyle="#1d2c22"; ctx.beginPath(); ctx.moveTo(W/2,0); ctx.lineTo(W/2,H);
-  ctx.moveTo(0,H/2); ctx.lineTo(W,H/2); ctx.stroke();
-  // kill zone
+  const sx=W/fw, sy=H/fh, ov=ovr();
+  ctx.clearRect(0,0,W,H);
+  if(!videoOn){ ctx.fillStyle="#0a0e0c"; ctx.fillRect(0,0,W,H); }  // transparent over live video
+  // grid + center reticle
+  if(ov.grid){
+    ctx.strokeStyle=videoOn?"#1e2b2288":"#111a14"; ctx.lineWidth=1;
+    for(let i=1;i<8;i++){ const x=W*i/8, y=H*i/8;
+      ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
+    ctx.strokeStyle=videoOn?"#2d4636aa":"#1d2c22";
+    ctx.beginPath(); ctx.moveTo(W/2,0); ctx.lineTo(W/2,H);
+    ctx.moveTo(0,H/2); ctx.lineTo(W,H/2); ctx.stroke();
+  }
+  // kill zone (always — it's the aim target)
   const kz=t.killzone;
   if(kz){
     const hot=t.would_fire;
@@ -232,23 +346,38 @@ function drawTactical(t){
     ctx.setLineDash([]);
     if(hot){ ctx.fillStyle="#e0492f22"; ctx.fillRect((kz.cx_px-kz.half_w_px)*sx,(kz.cy_px-kz.half_h_px)*sy,2*kz.half_w_px*sx,2*kz.half_h_px*sy); }
   }
-  // tracks
+  // tracks (bounding boxes + ids + velocity)
   const sel=t.selected_target_id;
-  (t.tracks||[]).forEach(tr=>{
+  if(ov.boxes) (t.tracks||[]).forEach(tr=>{
     const x=tr.cx*sx, y=tr.cy*sy, isSel=(tr.id===sel);
     ctx.strokeStyle=isSel?"#3fbf6f":"#2c7a4c"; ctx.lineWidth=isSel?2:1;
     const r=isSel?11:7; ctx.strokeRect(x-r,y-r,2*r,2*r);
     if(isSel){ ctx.strokeStyle="#3fbf6f55"; ctx.beginPath(); ctx.arc(x,y,r+6,0,7); ctx.stroke(); }
     ctx.fillStyle=isSel?"#dfeee4":"#5f7568"; ctx.font="10px ui-monospace, monospace";
     ctx.fillText("#"+tr.id, x+r+3, y-r);
-    // velocity vector
     if(tr.vx||tr.vy){ ctx.strokeStyle="#36a9b8"; ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x+tr.vx*sx*6,y+tr.vy*sy*6); ctx.stroke(); }
   });
-  // predicted lead
+  // projected aim (predicted lead point)
   const p=t.predicted_xy;
-  if(p && p[0]!=null && p[1]!=null){
+  if(ov.aim && p && p[0]!=null && p[1]!=null){
     const x=p[0]*sx, y=p[1]*sy; ctx.strokeStyle="#36a9b8"; ctx.lineWidth=1.5;
     ctx.beginPath(); ctx.moveTo(x-7,y-7); ctx.lineTo(x+7,y+7); ctx.moveTo(x+7,y-7); ctx.lineTo(x-7,y+7); ctx.stroke();
+  }
+  if(ov.hud) drawHud(ctx,t,W,H);
+}
+
+function drawHud(ctx,t,W,H){
+  ctx.textBaseline="bottom"; ctx.font="11px ui-monospace, monospace";
+  const lines=[
+    "ST "+(t.state||"--").toUpperCase(),
+    "PAN "+fmt(t.pan_cmd_deg,"°")+"  TILT "+fmt(t.tilt_cmd_deg,"°"),
+    "ERR "+fmt(t.aim_error_px,"px")+(t.selected_target_id!=null?"  #"+t.selected_target_id:""),
+  ];
+  let y=H-8;
+  for(let i=lines.length-1;i>=0;i--){
+    const w=ctx.measureText(lines[i]).width;
+    ctx.fillStyle="rgba(0,0,0,.55)"; ctx.fillRect(6,y-13,w+8,15);
+    ctx.fillStyle="#3fbf6f"; ctx.fillText(lines[i],10,y); y-=16;
   }
 }
 
@@ -287,8 +416,9 @@ function updateStream(s){
   const img=$("vis"), off=$("visoff");
   if(s.running && s.source==="usb"){
     const url=`${location.protocol}//${location.hostname}:${s.port}/?action=stream`;
-    if(img.style.display==="none"){ img.src=url; img.style.display="block"; off.style.display="none"; }
-  } else { img.style.display="none"; img.removeAttribute("src"); off.style.display="block"; }
+    if(img.getAttribute("src")!==url) img.src=url;
+    img.style.display="block"; off.style.display="none";
+  } else { img.style.display="none"; img.removeAttribute("src"); off.style.display="flex"; }
 }
 
 async function pollTelemetry(){
@@ -333,10 +463,16 @@ async function pollTelemetry(){
   ).join("") || `<tr><td colspan="7" style="color:var(--dim)">no contacts</td></tr>`;
 
   updateStream(t.stream);
+  if(t.frame){ FRAME=t.frame; }
+  if(t.detection_video && t.detection_video.enabled!==videoOn){ videoOn=t.detection_video.enabled; applyVideoState(); }
+  if(t.servo_limits){ ["pan_min_deg","pan_max_deg","tilt_min_deg","tilt_max_deg"].forEach(k=>{
+    const el=$("lim_"+k); if(el && el.value==="" && document.activeElement!==el) el.value=t.servo_limits[k]; }); }
+  if(t.camera){ [0,90,180,270].forEach(d=>$("rot"+d).classList.toggle("go", t.camera.rotation_deg===d)); }
   drawTactical(t);
 }
 
 function pollNow(){ pollTelemetry(); }
+applyVideoState();
 loadConfig();
 pollTelemetry();
 setInterval(pollTelemetry, 300);

@@ -15,6 +15,18 @@ from config import CameraConfig
 from errors import CameraError
 
 
+def rotate_frame(frame: np.ndarray, rotation_deg: int) -> np.ndarray:
+    """Rotate a frame counter-clockwise by 0/90/180/270 deg (pure, Mac-testable).
+
+    Corrects a physically rotated camera module. Returns a contiguous array so the
+    Edge-TPU interpreter (which needs C-contiguous input) is never handed a view.
+    """
+    k = (rotation_deg // 90) % 4
+    if k == 0:
+        return frame
+    return np.ascontiguousarray(np.rot90(frame, k))
+
+
 class FrameSource(abc.ABC):
     @abc.abstractmethod
     def read_frame(self) -> np.ndarray:
@@ -57,7 +69,8 @@ class PiCamCapture(FrameSource):
         try:
             yuv = self._picam.capture_array("lores")
             # YUV420 planar: the first H rows are the Y (luma) plane.
-            return yuv[: self._size, : self._size]
+            frame = yuv[: self._size, : self._size]
+            return rotate_frame(frame, self._cfg.rotation_deg)
         except Exception as exc:  # noqa: BLE001
             raise CameraError("picamera2 capture failed") from exc
 

@@ -62,6 +62,7 @@ class FireStateMachine:
         """Disarm: pump off, hold SAFE until ``reset``."""
         self._off_fire()
         self.state = FireState.SAFE
+        self.last_would_fire = False
 
     def step(self, ctx: FireContext) -> FireState:
         now = self._clock()

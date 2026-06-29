@@ -23,6 +23,7 @@ from __future__ import annotations
 import logging
 import math
 import os
+import time
 from dataclasses import asdict, fields
 from typing import Any, Dict, Optional
 
@@ -79,6 +80,9 @@ class TurretWebController:
         self.control = control
         self.streamer = streamer            # optional UsbStreamer (Pi-side), may be None
         self.jog_step_deg = jog_step_deg
+        self._jpeg_cache = None             # (monotonic_t, bytes) for the detection view
+        self._cal_samples = []              # [(cx, cy, pan_deg, tilt_deg)] calibration points
+
 
     # ---- read ----
 
@@ -121,14 +125,42 @@ class TurretWebController:
             "running": self.streamer.is_running() if self.streamer is not None else False,
             "port": self.cfg.stream.port,
         }
+        out["detection_video"] = {"enabled": bool(self.cfg.app.detection_video_enabled)}
         # Geometry for the tactical display (detection-frame pixel space).
         out["frame"] = {"w": int(self.cfg.camera.capture_width_px),
                         "h": int(self.cfg.camera.capture_height_px)}
         out["killzone"] = asdict(self.cfg.killzone)
+        s = self.cfg.servo
+        out["servo_limits"] = {
+            "pan_min_deg": s.pan_min_deg, "pan_max_deg": s.pan_max_deg,
+            "tilt_min_deg": s.tilt_min_deg, "tilt_max_deg": s.tilt_max_deg,
+            "home_pan_deg": s.home_pan_deg, "home_tilt_deg": s.home_tilt_deg,
+        }
+        out["cal_samples"] = len(self._cal_samples)
+        out["camera"] = {"rotation_deg": int(self.cfg.camera.rotation_deg)}
         return out
 
     def config_snapshot(self) -> Dict[str, Any]:
         return {name: asdict(getattr(self.cfg, name)) for name in EDITABLE_SECTIONS}
+
+    def detection_jpeg(self) -> Optional[bytes]:
+        """JPEG of the raw lores frame the detector sees (debug). None when disabled
+        / no frame. Rate-capped server-side so a fast client can't starve detection.
+        """
+        if not self.cfg.app.detection_video_enabled:
+            return None
+        min_dt = 1.0 / max(0.5, float(self.cfg.app.detection_video_max_fps))
+        now = time.monotonic()
+        if self._jpeg_cache is not None and (now - self._jpeg_cache[0]) < min_dt:
+            return self._jpeg_cache[1]
+        frame = self.pipeline.latest_frame.get()
+        if frame is None:
+            return None
+        from app.debugview import encode_jpeg
+        data = encode_jpeg(frame, self.cfg.app.detection_video_quality)
+        if data is not None:
+            self._jpeg_cache = (now, data)
+        return data
 
     def turret_state(self) -> Dict[str, str]:
         """v1-compatible: 'Enabled' when armed (auto-tracking), else 'Disabled'."""
@@ -159,6 +191,14 @@ class TurretWebController:
         elif code in ("disable_aux", "disable_aux_laser"):
             self.cfg.app.aux_marker_enabled = False
             self.control.apply_config()
+        elif code in ("marker_on", "aux_on"):
+            return {"ok": True, "command": code, "marker_on": self.control.set_marker(True)}
+        elif code in ("marker_off", "aux_off"):
+            return {"ok": True, "command": code, "marker_on": self.control.set_marker(False)}
+        elif code in ("detect_video_on", "detect_video_off"):
+            self.cfg.app.detection_video_enabled = (code == "detect_video_on")
+            return {"ok": True, "command": code,
+                    "detection_video": self.cfg.app.detection_video_enabled}
         elif code == "stream_usb":
             if self.streamer is None:
                 return {"ok": False, "error": "no streamer configured"}
@@ -217,6 +257,123 @@ class TurretWebController:
         logger.info("config updated: %s <- %s", section, changes)
         return {"ok": True, "section": section, "values": asdict(new_section)}
 
+    # ---- calibration + persistence (Phase C) ----
+
+    def calibrate(self, action: Optional[str], payload: Optional[Dict[str, Any]] = None
+                  ) -> Dict[str, Any]:
+        """Dispatch a calibration action (Set Home, limits, sample/fit, save)."""
+        payload = payload or {}
+        action = (action or "").strip()
+        if action == "set_home":
+            return self._set_home()
+        if action == "set_rotation":
+            return self._set_rotation(payload)
+        if action == "set_limits":
+            return self._set_limits(payload)
+        if action == "add_sample":
+            return self._cal_add(payload)
+        if action == "clear":
+            self._cal_samples.clear()
+            return {"ok": True, "samples": 0}
+        if action == "fit":
+            return self._cal_fit()
+        if action == "save":
+            return self.save_config()
+        if action == "status":
+            return {"ok": True, "samples": len(self._cal_samples)}
+        return {"ok": False, "error": f"unknown calibrate action: {action!r}"}
+
+    def _disarmed(self) -> bool:
+        from app.statemachine import FireState
+        return self.control.sm.state is FireState.SAFE
+
+    def _set_home(self) -> Dict[str, Any]:
+        """Record the current servo pose as the boot/Center home (persist with save)."""
+        pan = round(self.control.servo.last_angle(Axis.PAN), 2)
+        tilt = round(self.control.servo.last_angle(Axis.TILT), 2)
+        self.cfg.servo.home_pan_deg = pan      # in-place: ServoController shares this object
+        self.cfg.servo.home_tilt_deg = tilt
+        logger.info("home set to pan=%.2f tilt=%.2f deg", pan, tilt)
+        return {"ok": True, "home": [pan, tilt]}
+
+    def _set_rotation(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Set the camera rotation live (read per-frame in capture -> no restart).
+
+        Do this BEFORE calibrating: rotating after a fit invalidates the transform.
+        """
+        try:
+            deg = int(payload.get("rotation_deg"))
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "rotation_deg must be one of 0, 90, 180, 270"}
+        old = self.cfg.camera.rotation_deg
+        self.cfg.camera.rotation_deg = deg     # in-place; PiCamCapture reads it each frame
+        try:
+            self.cfg.validate()
+        except ConfigError as exc:
+            self.cfg.camera.rotation_deg = old
+            return {"ok": False, "error": str(exc)}
+        logger.info("camera rotation set to %d deg", deg)
+        return {"ok": True, "rotation_deg": deg}
+
+    def _set_limits(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        if not self._disarmed():
+            return {"ok": False, "error": "set limits only when disarmed"}
+        s = self.cfg.servo
+        keys = ("pan_min_deg", "pan_max_deg", "tilt_min_deg", "tilt_max_deg")
+        old = {k: getattr(s, k) for k in keys}
+        try:
+            for k, v in payload.items():
+                if k not in keys:
+                    raise ConfigError(f"not a travel limit: {k!r}")
+                setattr(s, k, float(v))        # in-place so the live ServoController sees it
+            self.cfg.validate()
+        except (ConfigError, ValueError, TypeError) as exc:
+            for k, v in old.items():
+                setattr(s, k, v)               # rollback
+            return {"ok": False, "error": str(exc)}
+        logger.info("travel limits set: %s", {k: getattr(s, k) for k in keys})
+        return {"ok": True, "limits": {k: getattr(s, k) for k in keys}}
+
+    def _cal_add(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            cx, cy = float(payload["cx"]), float(payload["cy"])
+        except (KeyError, ValueError, TypeError):
+            return {"ok": False, "error": "add_sample needs numeric cx, cy"}
+        pan = self.control.servo.last_angle(Axis.PAN)
+        tilt = self.control.servo.last_angle(Axis.TILT)
+        self._cal_samples.append((cx, cy, pan, tilt))
+        return {"ok": True, "samples": len(self._cal_samples),
+                "last": {"cx": round(cx, 1), "cy": round(cy, 1),
+                         "pan": round(pan, 2), "tilt": round(tilt, 2)}}
+
+    def _cal_fit(self) -> Dict[str, Any]:
+        from aim.calibrate import fit_calibration
+        if len(self._cal_samples) < 3:
+            return {"ok": False, "error": f"need >= 3 samples (have {len(self._cal_samples)})"}
+        pixels = [(c[0], c[1]) for c in self._cal_samples]
+        pans = [c[2] for c in self._cal_samples]
+        tilts = [c[3] for c in self._cal_samples]
+        try:
+            cal = fit_calibration(pixels, pans, tilts)
+        except Exception as exc:  # noqa: BLE001 — surface fit error to the operator
+            return {"ok": False, "error": f"fit failed: {exc}"}
+        self.cfg.aim.pan_coeffs = list(cal.pan_coeffs)    # in-place; apply_config rebuilds cal
+        self.cfg.aim.tilt_coeffs = list(cal.tilt_coeffs)
+        self.control.apply_config()
+        logger.info("calibration fitted from %d pts: pan=%s tilt=%s",
+                    len(self._cal_samples), cal.pan_coeffs, cal.tilt_coeffs)
+        return {"ok": True, "samples": len(self._cal_samples),
+                "pan_coeffs": list(cal.pan_coeffs), "tilt_coeffs": list(cal.tilt_coeffs)}
+
+    def save_config(self) -> Dict[str, Any]:
+        from config import save_local_config
+        try:
+            delta = save_local_config(self.cfg)
+        except ConfigError as exc:
+            return {"ok": False, "error": str(exc)}
+        logger.info("config saved (overlay sections: %s)", sorted(delta.keys()))
+        return {"ok": True, "saved_sections": sorted(delta.keys())}
+
 
 # --------------------------------------------------------------------------
 # Bottle adapter (lazy import so the Mac test venv without bottle still imports)
@@ -264,6 +421,16 @@ def create_app(controller: TurretWebController, ui_path: Optional[str] = None):
     def get_config():
         return controller.config_snapshot()
 
+    @app.get("/api/detect-frame.jpg")
+    def detect_frame():
+        data = controller.detection_jpeg()
+        if not data:
+            bottle.response.status = 204            # disabled / no frame yet
+            return ""
+        bottle.response.content_type = "image/jpeg"
+        bottle.response.set_header("Cache-Control", "no-store")
+        return bytes(data)
+
     @app.post("/api/config")
     def post_config():
         body = bottle.request.json or {}
@@ -278,6 +445,11 @@ def create_app(controller: TurretWebController, ui_path: Optional[str] = None):
     @app.post("/api/control-cmd")
     def control_cmd():
         return _maybe_error(controller.manual_control(_read_code(bottle.request)))
+
+    @app.post("/api/calibrate")
+    def calibrate():
+        body = bottle.request.json or {}
+        return _maybe_error(controller.calibrate(body.get("action"), body.get("payload")))
 
     return app
 

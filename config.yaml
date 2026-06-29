@@ -9,6 +9,24 @@ camera:
   lores_format: YUV420            # Pi 4 lores must be YUV420
   fixed_focus: true
   lens_position: 4.0
+  rotation_deg: 0                 # 0/90/180/270 — set if the module is mounted rotated
+                                  # (FPC ribbon not at the bottom). Prefer a physical
+                                  # remount; confirm orientation with a test capture.
+
+stream:                           # USB-webcam live view via mjpg-streamer subprocess
+  enabled: true
+  device: /dev/video0             # the USB webcam (NOT the Pi Cam)
+  width_px: 640
+  height_px: 480
+  fps: 15
+  port: 8080
+  # The bare name "mjpg_streamer" is not on PATH on the Pi; point at v1's committed
+  # ARM build (deploys via git push). The .so plugins live in plugin_dir.
+  binary: v1/mjpg-streamer/mjpg-streamer-experimental/_build/mjpg_streamer
+  plugin_dir: v1/mjpg-streamer/mjpg-streamer-experimental
+  input_plugin: input_uvc.so
+  output_plugin: output_http.so
+  www_dir: ""
 
 detector:
   backend: coral_yolo             # coral_yolo | coral_mobiledet | cpu
@@ -77,8 +95,8 @@ servo:
   pulse_offset_us: 501.0
   pulse_min_us: 500.0
   pulse_max_us: 2500.0
-  home_pan_deg: 31.0
-  home_tilt_deg: 23.0
+  home_pan_deg: 26.0              # geometric mid-travel; recalibrate via Set Home + Save
+  home_tilt_deg: 15.0
 
 pump:
   pump_gpio_bcm: 26               # via relay/MOSFET + flyback diode, never bare GPIO
@@ -102,6 +120,9 @@ app:
   stream_source: usb              # usb | picam_annotated
   web_port: 8001
   log_level: INFO
+  detection_video_enabled: false  # debug: stream the detector's lores frame (JPEG) under the canvas
+  detection_video_max_fps: 5.0    # server-side encode-rate cap (protects detection FPS)
+  detection_video_quality: 70
   lcd_enabled: true               # 1602A on I2C bus 1 (rpi_lcd), shares bus with PCA9685
   lcd_refresh_hz: 4.0
   status_led_enabled: true        # BCM23

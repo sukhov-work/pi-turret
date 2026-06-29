@@ -115,6 +115,16 @@ def test_aux_command_applies_to_control(rig):
     assert control._aux_enabled is False
 
 
+def test_marker_commands_force_control_marker(rig):
+    cfg, servo, control, pipeline, web = rig
+    res = web.command("marker_on")
+    assert res["ok"] is True and res["marker_on"] is True
+    assert control._marker_on is True
+    res = web.command("marker_off")
+    assert res["ok"] is True and res["marker_on"] is False
+    assert control._marker_on is False
+
+
 def test_unknown_command(rig):
     cfg, servo, control, pipeline, web = rig
     assert web.command("frobnicate")["ok"] is False
@@ -256,3 +266,119 @@ def test_stream_off_stops(rig):
 def test_stream_command_without_streamer_errors(rig):
     cfg, servo, control, pipeline, web = rig   # rig's web has no streamer
     assert web.command("stream_usb")["ok"] is False
+
+
+# ---- detection-cam debug video (Phase B) ----
+
+def test_detection_video_disabled_returns_none(rig):
+    cfg, servo, control, pipeline, web = rig
+    assert cfg.app.detection_video_enabled is False
+    assert web.detection_jpeg() is None            # gated off: never touches cv2
+
+
+def test_detection_video_command_toggles_flag(rig):
+    cfg, servo, control, pipeline, web = rig
+    assert web.command("detect_video_on")["ok"] is True
+    assert cfg.app.detection_video_enabled is True
+    assert web.command("detect_video_off")["ok"] is True
+    assert cfg.app.detection_video_enabled is False
+
+
+def test_detection_video_enabled_but_no_frame_returns_none(rig):
+    cfg, servo, control, pipeline, web = rig
+    cfg.app.detection_video_enabled = True
+    assert pipeline.latest_frame.get() is None
+    assert web.detection_jpeg() is None            # no frame yet -> None, no cv2
+
+
+def test_detection_jpeg_encodes_once_then_serves_cache(rig, monkeypatch):
+    import numpy as np
+
+    import app.debugview as dv
+    cfg, servo, control, pipeline, web = rig
+    cfg.app.detection_video_enabled = True
+    cfg.app.detection_video_max_fps = 5.0
+    pipeline.latest_frame.put(np.zeros((256, 256), np.uint8))
+    calls = {"n": 0}
+    monkeypatch.setattr(dv, "encode_jpeg",
+                        lambda frame, q: (calls.__setitem__("n", calls["n"] + 1) or b"JPG"))
+    first = web.detection_jpeg()
+    second = web.detection_jpeg()                  # within 1/5s -> cached, no re-encode
+    assert first == second == b"JPG"
+    assert calls["n"] == 1
+
+
+def test_telemetry_exposes_detection_video_flag(rig):
+    cfg, servo, control, pipeline, web = rig
+    assert web.telemetry()["detection_video"]["enabled"] is False
+
+
+# ---- calibration + persistence (Phase C) ----
+
+def test_set_home_records_current_pose(rig):
+    cfg, servo, control, pipeline, web = rig
+    web.command("disarm")
+    web.manual_control("left")                      # nudge pan while disarmed
+    pan, tilt = servo.last_angle(Axis.PAN), servo.last_angle(Axis.TILT)
+    res = web.calibrate("set_home")
+    assert res["ok"] is True
+    assert cfg.servo.home_pan_deg == round(pan, 2)
+    assert cfg.servo.home_tilt_deg == round(tilt, 2)
+
+
+def test_set_rotation_live_and_validated(rig):
+    cfg, servo, control, pipeline, web = rig
+    assert web.calibrate("set_rotation", {"rotation_deg": 90})["ok"] is True
+    assert cfg.camera.rotation_deg == 90           # in-place; capture reads it per-frame
+    bad = web.calibrate("set_rotation", {"rotation_deg": 45})
+    assert bad["ok"] is False
+    assert cfg.camera.rotation_deg == 90           # rolled back to last good
+
+
+def test_set_limits_refused_when_armed(rig):
+    cfg, servo, control, pipeline, web = rig
+    web.command("arm")
+    assert web.calibrate("set_limits", {"pan_max_deg": 40})["ok"] is False
+
+
+def test_set_limits_applies_in_place_and_rolls_back(rig):
+    cfg, servo, control, pipeline, web = rig
+    web.command("disarm")
+    assert web.calibrate("set_limits", {"pan_max_deg": 40.0})["ok"] is True
+    assert cfg.servo.pan_max_deg == 40.0            # live ServoController shares this object
+    assert servo._cfg.pan_max_deg == 40.0
+    before = cfg.servo.pan_min_deg
+    bad = web.calibrate("set_limits", {"pan_min_deg": 99.0})  # min >= max -> validate fails
+    assert bad["ok"] is False
+    assert cfg.servo.pan_min_deg == before          # rolled back
+
+
+def test_calibration_add_fit_applies_live(rig):
+    cfg, servo, control, pipeline, web = rig
+    web.command("disarm")
+    for i, (cx, cy) in enumerate([(100, 100), (900, 200), (500, 900)]):
+        servo.set_angle(Axis.PAN, 10 + i * 5)
+        servo.set_angle(Axis.TILT, 8 + i * 3)
+        web.calibrate("add_sample", {"cx": cx, "cy": cy})
+    assert web.telemetry()["cal_samples"] == 3
+    res = web.calibrate("fit")
+    assert res["ok"] is True
+    assert control.cal.pan_coeffs == tuple(cfg.aim.pan_coeffs)   # fit applied to live aim
+
+
+def test_calibration_fit_needs_three_samples(rig):
+    cfg, servo, control, pipeline, web = rig
+    web.calibrate("clear")
+    web.calibrate("add_sample", {"cx": 1, "cy": 2})
+    assert web.calibrate("fit")["ok"] is False
+
+
+def test_save_config_writes_overlay(rig, tmp_path, monkeypatch):
+    pytest.importorskip("yaml")
+    cfg, servo, control, pipeline, web = rig
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "config.yaml").write_text("servo:\n  home_pan_deg: 26.0\n")
+    cfg.servo.home_pan_deg = 30.0
+    res = web.save_config()
+    assert res["ok"] is True and "servo" in res["saved_sections"]
+    assert (tmp_path / "config.local.yaml").exists()
