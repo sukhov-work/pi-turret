@@ -194,18 +194,52 @@ Pipelined, not serial. One process, threads sharing **lock-protected single-slot
 - Real water-stream velocity/range → the lead and aim-above constants (Step 1.6).
 - Snapshot volume/retention policy (SD wear) — sample rate vs fire-only.
 
-## 8. Build status, wiring, and added steps (updated 2026-06-27)
+## 8. Build status, wiring, and added steps (updated 2026-06-29)
 
-Authored + unit-tested on the **Mac** (`.venv-v2`, Python 3.9.6) — **176 passed / 1 skipped**.
-v1 untouched. v2 lives at the **repo root** (top-level packages; imports are `from detect import …`,
-deploy is **git push-to-deploy**: `git push pi|strix main` → `~/pi-turret` on each box, never rsync — reach via `ssh pi`/`ssh strix` over Tailscale, mosh+tmux for long sessions; access details in `mem:project/machine_access`, creds in `.claude/.env`). Run tests: `.venv-v2/bin/python -m pytest -q`.
+Authored + unit-tested on the **Mac** (`.venv-v2`, Python 3.9.6) — **177 passed / 1 skipped**.
+v1 untouched. v2 lives at the **repo root** (top-level packages; imports are `from detect import …`).
+Reach the boxes via `ssh pi`/`ssh strix` over Tailscale (mosh+tmux for long sessions; access in
+`mem:project/machine_access`, creds in `.claude/.env`). Run tests: `.venv-v2/bin/python -m pytest -q`.
+**Deploy = commit + push to `pi`/`strix`/`origin` — see "Deployment" below.**
+
+### Critical path & honest status (read first)
+Most of Phase 1's **Mac-authorable** work (pure logic + UI/IO) was built **ahead of plan order**:
+tracker, predictor, scoring/selection, calibration apply, controller, kill-zone, state machine,
+pump, LCD, indicators, **web UI (1.11)**, **USB streamer (1.12)** are all DONE on the Mac (177
+tests). What was **skipped is the actual blocker** — Step 1.1's real model work (export → Edge-TPU
+compile → golden fixture → on-Pi latency), because it needs the Strix box **and a model**. The UI
+steps (1.11/1.12) and IO steps (1.13/1.14) were a **jump ahead of the detector**; harmless (they're
+contract-isolated and Pi-unverified anyway), but the detector is the true critical path now.
+➡ **Next focus = §9 "Detector Build Track".** Everything tagged "DONE (Mac logic)" awaits Pi truth, not new code.
+
+### Deployment (push-to-deploy + GitHub hub)
+Mac is the source of truth. Three remotes (`git remote -v`): **`pi`** and **`strix`** push-to-checkout
+into **`~/pi-turret`** on each box; **`origin`** is GitHub `sukhov-work/pi-turret`.
+
+| Push | Target | Last verified |
+|---|---|---|
+| `git push origin main` | GitHub `sukhov-work/pi-turret` | Mac = origin/main @ `6884880` |
+| `git push strix main` | `yevhen@…:/home/yevhen/pi-turret` | Strix @ `6884880` (current) |
+| `git push pi main` | `jayson@…:/home/jayson/pi-turret` | maintained via push (Pi unreachable at last check — re-verify) |
+
+**The boxes only get code you've COMMITTED + PUSHED.** Workflow: commit on the Mac → `git push pi main`
+&& `git push strix main` (+ `git push origin main`) → each box checks out automatically. `rsync`/`scp`
+for big artifacts only (models, datasets, golden fixtures). Reach via `ssh pi` / `ssh strix` (Tailscale;
+creds in `.claude/.env`). **Reminder:** uncommitted/unpushed Mac changes are NOT on the boxes.
+
+### Gates before the Detector Build Track (§9) — ✅ all CLEARED 2026-06-29
+- **Strix toolchain:** DONE — `edgetpu_compiler` v16.0 + `~/turret-ml` (uv, Py 3.12, ultralytics). (§9.0)
+- **Model:** DONE — first finetuned single-class bird model trained (HUB) + compiled clean (1 subgraph,
+  252 ops): `models/bird_yolov8n_256_int8_edgetpu_run1.tflite` (+ vanilla reference). (§9.1/§9.2)
+- **INT8 calibration imgs:** DONE — the Roboflow set (1152 imgs) staged on Strix doubles as calib.
+- **Remaining (§9.3→§9.6):** golden fixture (un-skip the decode test) → deploy to Pi → measure latency/FPS → integrate.
 
 ### Per-step status
 | Step | Status | What finishes it (machine) |
 |---|---|---|
 | 0.1–0.3 foundation (tree/venv, `config`, `contracts`) | **DONE (Mac)** | — |
-| 1.1 `decode_v8` + NMS + golden guard | **DONE (Mac logic)** | export+compile+latency + **capture golden fixture** (Strix/Pi) |
-| 1.1b MobileDet fallback | TODO | Strix/Pi, only if 1.1 gate fails |
+| 1.1 `decode_v8` + NMS + golden guard | **DONE (Mac logic)** | ⟶ **§9 Detector Build Track** (Strix export+compile, golden fixture, Pi latency) |
+| 1.1b MobileDet/SSD backend | TODO | ⟶ **§9.5** `detect/mobiledet_coral.py`; research says this is the *default*, not just fallback |
 | 1.2 `capture.py` PiCam lores YUV420 | AUTHORED | FPS/focus truth (Pi) |
 | 1.3/1.4 `IouTracker` + lead predictor | **DONE (Mac)** | tune on a recorded Pi clip |
 | 1.5 scoring + hysteresis selector | **DONE (Mac)** | tune weights on-device |
@@ -268,3 +302,110 @@ Free pins besides BCM17: 4/5/6/12/13/16/18/19/20/21/22/24/25 + SPI block. BCM 2/
   remote's key codes on the Pi and fill `RemoteConfig` key fields.
 - **Validation:** `build_key_map` unit-tested; on-Pi a key-down dispatches its action without affecting the
   control loop; remote errors are best-effort (never crash control).
+
+## 9. Detector Build Track — **NEXT (the real critical path)**
+
+This supersedes the terse Steps 1.1/1.1b: it is the concrete, machine-tagged sequence to get a
+**single-class "bird" detector onto the Coral**, validated and integrated. Bake off the two
+contract-compatible backends (research: `plans/coral-detector-selection-research.md`): **SSDLite-
+MobileDet@320 = safe default**, **single-class YOLOv8n@256 = gated upgrade** (its head may split to
+CPU → catastrophic on Pi 4), **SpaghettiNet-EdgeTPU = top later candidate**. Both emit the same
+`Detection` contract, so nothing downstream (tracker/strategy/aim/UI) changes when the winner flips.
+
+**Decisions to make at the start of next session (recommendations in *italics*):**
+- **D-A Deploy:** standardize on the GitHub hub + one canonical dir per box? *Yes — pull all boxes to
+  `origin/main`; retire `~/pi-turret`.* (See §8 Deployment reality.)
+- **D-B First-light model:** *bring up the pipeline on stock COCO models first (YOLOv8n + a Coral-zoo
+  MobileDet, filter class 14 = bird) to de-risk compile+decode+latency before investing in a custom
+  bird model.* Then train/finetune the single-class production model.
+- **D-C edgetpu_compiler delivery:** *Docker* (Docker is already on Strix) vs a pinned host install.
+
+### 9.0 GATE — Strix toolchain setup ✅ **DONE 2026-06-29**
+- **`edgetpu_compiler` v16.0** installed globally (apt, Coral repo `coral-edgetpu-stable`, signed-by
+  keyring) — on PATH.
+- **`~/turret-ml`** = **uv-managed Python 3.12.13** venv (uv 0.11.25 via pipx; Strix's only system
+  Python is 3.13, which breaks the TF/onnx2tf export chain → 3.12 venv is the dodge). The venv has **no
+  system pip** (uv-managed) — install with `uv pip install --python ~/turret-ml/bin/python …`; run tools
+  as `~/turret-ml/bin/{yolo,python}`. `ultralytics`+`roboflow`+`onnx`+`onnxslim`+`pip` installed; TF/
+  onnx2tf are auto-installed by `yolo export format=edgetpu` (smoke-test log `/tmp/mlbuild.log`).
+- **GPU:** ROCm 7.1 + gfx1151 (Ryzen AI MAX 395) present for optional torch-ROCm training accel later.
+- Strix `~/pi-turret` checkout is current (`6884880`). ultralytics 8.4.81, onnxruntime 1.27.0, TF `<=2.19.0`.
+
+### 9.1 Model sourcing ✅ **DONE 2026-06-29** — first model trained + converted
+- **run1 shipped to `models/`:** HUB run `test-8n-run-1.pt` (single-class bird) → exported on Strix →
+  `models/bird_yolov8n_256_int8_edgetpu_run1.tflite` (+ `.pt` source). Gate passed (§9.2). Not yet on Pi.
+- **Existing models are JUNK** (owner): everything in `v1/models/` + on the Pi is **obsolete — do not
+  ship**. Going from scratch.
+- **Dataset:** owner's **Roboflow** set, **single class `['bird']`** (`jayson-x-an0sg/pigeons-single-class`):
+  **1152 train / 196 val / 63 test**, YOLO-format. **Staged on Strix** at
+  `~/turret-ml/datasets/pigeons-single-class/` (data.yaml fixed to absolute paths). Source on Mac:
+  `~/Downloads/Pigeons Single class.yolov8`.
+- **First model:** **YOLOv8n @256, single class** → output `[1,5,8400]` (matches `decode_v8` + the golden
+  test; `config.detector.num_classes=1`). **Train via Ultralytics HUB cloud** (owner's choice, GPU/fast)
+  *or* locally on Strix; the **edgetpu export+compile is on Strix regardless** (compiler is x86-local).
+- **Training config (verified):** base `yolov8n`, **`imgsz=256` (NOT 640)** — deploy is locked at 256 by
+  the Coral gate, so train==deploy (a 640 model's val mAP overstates real 256 accuracy and its small-bird
+  gain is lost at 256 inference). **`epochs≈300, patience≈50`** (1152 imgs converge early; 1000/100 just
+  wastes time). Keep default aug (mosaic, fliplr 0.5, hsv, close_mosaic 10). `single_cls` irrelevant
+  (dataset already nc=1).
+- **INT8 calibration:** the **Roboflow training images double as the >300-img calib set** — pass
+  `data=~/turret-ml/datasets/pigeons-single-class/data.yaml int8=True` to `yolo export`.
+- **Bring-up shortcut (optional):** stock COCO `yolov8n.pt` already smoke-tested the toolchain end-to-end
+  (§9.0) — can capture the golden fixture (§9.3) before the trained model lands.
+- **Bake-off:** YOLOv8n is the confirmed primary (§9.2 gate passed); MobileDet only if on-Pi latency
+  disappoints. **Machine:** HUB/Strix (train) + Strix (export). **Rollback:** v1 ONNX-CPU detector in `v1/`.
+
+### 9.2 Compile gate (Stage 0, Strix) — ✅ **YOLOv8n PASSED 2026-06-29**
+- **Measured (stock yolov8n@256 INT8 smoke test, edgetpu_compiler 16.0):** **1 Edge-TPU subgraph,
+  all 256 ops on the TPU (0 on CPU)**, on-chip 3.57 MiB / 3.23 MiB free, off-chip streaming 7.88 KiB
+  (≈0). The v8 head ops the research feared (SOFTMAX/TRANSPOSE/STRIDED_SLICE/RESHAPE) **map cleanly
+  on this toolchain** → **YOLOv8n is the confirmed primary; MobileDet is now only the fallback**.
+- **YOLO export flags:** `nms=False dynamic=False imgsz=256 int8=True data=<roboflow>/data.yaml`.
+- **✅ Finetuned single-class model PASSED too (run1, `test-8n-run-1.pt`, 2026-06-29):** **1 subgraph,
+  252 ops all on TPU**, on-chip 3.11 MiB / 3.68 MiB free, off-chip 7.88 KiB → `models/bird_yolov8n_256_int8_edgetpu_run1.tflite`.
+  Smaller head than stock 80-class (252 vs 256 ops) = more on-chip headroom, as predicted.
+- **Accept if** `edgetpu_compiler -s` reports **`Number of Edge TPU subgraphs: 1`** and off-chip
+  streaming ≈0 (the strict ideal is `0.00B`; a few KiB like our 7.88 KiB is fine — the catastrophic
+  case is a *split tail* sending most ops to CPU).
+- **Netron check:** int8 in/out; YOLO output `[1,4+nc,8400]` (no objectness). Compiled file **must end
+  `_edgetpu.tflite`** or the runtime silently falls back to CPU.
+- **Go/No-Go:** reject any candidate needing 2+ subgraphs or a split tail (Pi-4 CPU fallback ≈
+  1800–2100 ms vs ~22 ms mapped). **Machine:** Strix.
+
+### 9.3 Decode golden fixture *(un-skips the Mac guard test)*
+- On Strix/Pi run Ultralytics `model.predict` on a **saved frame**; dump the raw output tensor →
+  `tests/fixtures/raw_output.npy` + the reference boxes/scores → `tests/fixtures/predict_ref.json`.
+  Pull artifacts back (rsync/scp), commit on the Mac.
+- This **pins `detect/decode.py::decode_v8.coords_normalized`** and turns
+  `test_v8_decode_matches_ultralytics_reference` green — the permanent guard against the v5/v8
+  decoder mismatch (the original v1 Coral bug). **Machine:** Strix/Pi to generate, Mac to assert.
+
+### 9.4 On-Pi latency + sanity *(Pi truth — no number is real until measured here)*
+- Inference-only benchmark per passing candidate; record **ms/frame + FPS**. Note USB port: **USB2 ≈
+  3× slower than USB3**. Stay on `libedgetpu1-std` (no active cooling).
+- `detect/coral.py::CoralDetector.infer` returns **sane Detections** on a real frame, mapped to
+  full-frame pixels (the `Detection` contract).
+- **Go/No-Go:** GO if measured detect leaves headroom for the ~15–24 FPS control budget; if YOLOv8n
+  split or is too slow, **ship MobileDet** and keep YOLOv8n as the gated upgrade. **Machine:** Pi.
+
+### 9.5 Integrate into v2 *(same `Detection` contract — no downstream churn)*
+- **YOLO path:** `detect/coral.py` (exists) + `detect/decode.py::decode_v8` (exists). Set
+  `config.detector.model_path` (ends `_edgetpu.tflite`), `input_size_px`, `conf/iou`, `num_classes`.
+- **SSD/MobileDet path:** add **`detect/mobiledet_coral.py`** — SSD post-process reads the
+  `TFLite_Detection_PostProcess` outputs (boxes / classes / scores **directly**; **no YOLO transpose,
+  no `decode_v8`**), filters to bird, emits identical `Detection`. Select via `config.detector.backend`
+  (`coral_yolo | coral_mobiledet`). Add a small Mac unit test for the SSD post-process shape mapping.
+- **Validation:** full Mac suite green; on Pi the pipeline runs with the chosen backend and switching
+  `backend` needs no tracker/strategy/aim/UI change. **Machine:** Mac (author/test) + Pi (run).
+
+### 9.6 Record + choose the P1 default
+- Fill a comparison row per candidate in DECISIONS: **subgraphs · off-chip B · Pi ms · FPS · sane
+  boxes · INT8 notes**. Pick the P1 default (research bias: **MobileDet** unless YOLOv8n passes Stage 0
+  *and* is fast enough). Note the upgrade order: **SpaghettiNet-EdgeTPU → EfficientDet-Lite0 →
+  YOLOv8n@256 → YOLOv5s@320**. Update `mem:decisions/detector_build_plan` with measured numbers.
+
+### Detector track exit criteria
+1. One candidate compiles to **1 subgraph / 0 B off-chip**, file ends `_edgetpu.tflite`.
+2. Golden fixture committed; `test_decode` real-model test green on the Mac.
+3. Measured Pi inference ms/FPS recorded; `CoralDetector` (or MobileDet) returns sane boxes on a real frame.
+4. Backend selectable by config with zero downstream change; full Mac suite green; v1 still the rollback.

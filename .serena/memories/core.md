@@ -35,4 +35,6 @@ Conventions: `.claude/conventions/`. Workflow: the `/turret` skill.
 - `mem:task_completion` — quality gate before claiming done
 - `mem:project/dev_environment` — three-machine parity, what can't be tested locally
 - `mem:project/machine_access` — how the Mac reaches/operates/deploys to the boxes (anonymized; creds in `.env`)
+- `mem:decisions/detector_build_plan` — **NEXT WORK**: Coral detector (MobileDet vs YOLOv8n bake-off), Strix setup gates, model assets
+- `mem:patterns/ui_aesthetic` — mil-tech UI design language (realized in `app/web_ui.html`)
 - `mem:memory_maintenance` — how to maintain this graph

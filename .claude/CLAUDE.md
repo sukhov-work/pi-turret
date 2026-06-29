@@ -55,7 +55,9 @@ cd v1 && python3 main.py             # Bottle UI on :8001
 # Tests (pure logic: decode, NMS, calibration, controller, state machine) — on the Mac
 python -m pytest tests/ -v
 
-# Deploy (Mac = source of truth): git push-to-deploy to ~/pi-turret on each box (NOT rsync)
+# Deploy (Mac = source of truth): COMMIT, then push-to-deploy. The boxes only get code you've
+# committed AND pushed — remember both. (Remotes: `git remote -v`; pi/strix push-to-checkout into ~/pi-turret.)
+git push origin main  # GitHub hub (sukhov-work/pi-turret)
 git push pi main      # Pi    — push-to-checkout into ~/pi-turret (reach: ssh pi)
 git push strix main   # Strix — push-to-checkout into ~/pi-turret (reach: ssh strix)
 # hosts/users/key/passwords in .claude/.env (gitignored — never commit). rsync/scp = big artifacts only.
@@ -70,6 +72,7 @@ The v2 venv/layout and exact test runner are set in Phase 0 of the plan — conf
   `v1/PCA9685.py`, `v1/Utils.py`, `v1/models/`, `v1/edgetpu-yolo/`, `v1/mjpg-streamer/`, `v1/index.html`.
   Run it with `cd v1 && python3 main.py` — v1's relative paths resolve against the `v1/` CWD.
 - **v2 (build here):** new tree + venv per the plan; v1 stays runnable.
+- **`models/` (committed):** Edge-TPU detector models for tests + deploy — vanilla `yolov8n_coco80_256_int8_edgetpu.tflite` + finetuned `bird_yolov8n_256_int8_edgetpu_run<N>.tflite` (+ `.pt` sources). See `models/README.md`. Compiled on Strix; a deployable file must end `_edgetpu.tflite`.
 
 ## Top footguns
 - `v1/TurretHandler.py` runs a full hardware-init + infinite detection loop **at import** (trailing

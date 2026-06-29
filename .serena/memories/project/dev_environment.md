@@ -16,18 +16,26 @@ those are Pi-only facts. Pure logic (decode, NMS, calibration, controller, state
 
 ## Access & deploy
 See `mem:project/machine_access` — Tailscale SSH via `ssh pi` / `ssh strix`, mosh+tmux for long work,
-**git push-to-deploy** (`git push pi|strix main` → `~/pi-turret`, never rsync), creds only in `.claude/.env`.
+creds only in `.claude/.env`.
+
+**Deploy = commit + push-to-deploy.** Remotes (`git remote -v`): `pi` + `strix` push-to-checkout into
+**`~/pi-turret`** on each box; `origin` = GitHub `sukhov-work/pi-turret`. Workflow: commit on the Mac →
+`git push pi main` && `git push strix main` (+ `git push origin main`) → each box checks out
+automatically. **The boxes only get code you've COMMITTED + PUSHED** — remember both (an earlier
+`ModuleNotFoundError: app.streamer` was just a box running un-pushed code, not a "stale" target).
+Strix verified current at `6884880`. Big artifacts (models/datasets/fixtures) via rsync, not git;
+never commit `.claude/.env`.
 
 ## What CAN'T be tested locally (Mac)
 - `picamera2` / `libcamera` / `RPi.GPIO` / `smbus` imports (hardware-only) — mock them in tests.
 - Real inference latency / FPS, Coral execution, servo travel, aiming accuracy, fire timing.
-- `edgetpu_compiler` (x86-64 only — the Strix box).
+- `edgetpu_compiler` (x86-64 only — the Strix box; **installed**, see `mem:decisions/detector_build_plan`).
 
 ## Practical workflow
 1. Author + unit-test logic on the Mac (hardware mocked, no import side effects).
-2. Build/export/compile models on the Strix box; the compiled file ends `_edgetpu.tflite`.
-3. **git push** code to the box (push-to-deploy), run on-device, record measured numbers; bench servos
-   dry before any live fire. Move large artifacts (models/images) with rsync, not git.
+2. Build/export/compile models on the Strix box (`~/turret-ml` venv); the compiled file ends `_edgetpu.tflite`.
+3. **commit + git push** code to the box (push-to-deploy), run on-device, record measured numbers; bench
+   servos dry before any live fire. Move large artifacts (models/images) with rsync, not git.
 
 ## Parity tips
 - Keep on-device code Python-3.9-clean (no `match`, no `X | Y` unions).
