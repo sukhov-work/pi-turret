@@ -75,3 +75,15 @@ def test_reacquire_keeps_predicting_velocity_across_gap():
     tr.update([])                                  # 1-frame occlusion
     out = tr.update([make_detection(cx=130, cy=100)])  # moved 20 over 2 frames
     assert out[0].vx == 10.0  # (130-110)/2 frames
+
+
+def test_apply_config_updates_params_live():
+    from config import Config
+    t = IouTracker(0.3, 30, 3, 0.5)
+    cfg = Config()
+    cfg.tracker.iou_match_threshold = 0.6
+    cfg.tracker.max_age_frames = 12
+    cfg.tracker.min_hits = 5
+    cfg.tracker.velocity_smoothing = 0.2
+    t.apply_config(cfg.tracker)
+    assert (t.iou_threshold, t.max_age_frames, t.min_hits, t.alpha) == (0.6, 12, 5, 0.2)

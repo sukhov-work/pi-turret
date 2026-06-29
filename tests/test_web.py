@@ -156,6 +156,37 @@ def test_manual_stop_is_noop(rig):
     assert servo.last_angle(Axis.TILT) == before
 
 
+def test_jog_up_raises_aim_down_lowers(rig):
+    """UP must raise the aim; on this rig that means a LOWER tilt angle."""
+    cfg, servo, control, pipeline, web = rig
+    web.command("disarm")
+    t0 = servo.last_angle(Axis.TILT)
+    web.manual_control("up")
+    assert servo.last_angle(Axis.TILT) == max(t0 - 2.0, cfg.servo.tilt_min_deg)
+    t1 = servo.last_angle(Axis.TILT)
+    web.manual_control("down")
+    assert servo.last_angle(Axis.TILT) == min(t1 + 2.0, cfg.servo.tilt_max_deg)
+
+
+def test_manual_fire_command_triggers_pump_then_stop(rig):
+    cfg, servo, control, pipeline, web = rig
+    fires, offs = [], []
+    class _P:
+        def fire(self, d): fires.append(d)
+        def off(self): offs.append(1)
+    control._pump = _P()
+    web.command("disarm")                       # works even when disarmed
+    assert web.command("fire_now")["ok"] is True
+    assert fires == [cfg.fire.fire_duration_s]
+    assert web.command("pump_off")["ok"] is True
+    assert offs == [1]
+
+
+def test_manual_fire_without_pump_reports_error(rig):
+    cfg, servo, control, pipeline, web = rig   # rig control has no pump
+    assert web.command("fire_now")["ok"] is False
+
+
 # ---- config tuning ----
 
 def test_update_config_valid(rig):
@@ -187,9 +218,25 @@ def test_update_config_invalid_value_rolls_back(rig):
     assert cfg.fire.fire_duration_s == before                # section restored
 
 
-def test_update_config_section_not_tunable(rig):
+def test_update_config_unknown_section_rejected(rig):
     cfg, servo, control, pipeline, web = rig
-    assert web.update_config("servo", {"pan_max_deg": 90})["ok"] is False
+    assert web.update_config("nonsense", {"x": 1})["ok"] is False
+
+
+def test_all_sections_are_editable_and_snapshotted(rig):
+    cfg, servo, control, pipeline, web = rig
+    snap = web.config_snapshot()
+    for s in ("camera", "stream", "detector", "tracker", "predict", "strategy",
+              "killzone", "aim", "controller", "servo", "pump", "fire", "app", "remote"):
+        assert s in snap, s
+
+
+def test_update_servo_section_applies_to_live_servo(rig):
+    cfg, servo, control, pipeline, web = rig
+    res = web.update_config("servo", {"pan_max_deg": 40.0})   # hardware section now tunable
+    assert res["ok"] is True
+    assert cfg.servo.pan_max_deg == 40.0
+    assert servo._cfg.pan_max_deg == 40.0                     # _resync re-pointed the live servo
 
 
 def test_update_config_aim_rebuilds_calibration(rig):

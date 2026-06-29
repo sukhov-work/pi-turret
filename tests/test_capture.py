@@ -21,3 +21,14 @@ def test_rotate_square_frame_keeps_dims():
     a = np.zeros((256, 256), dtype=np.uint8)
     for deg in (0, 90, 180, 270):
         assert rotate_frame(a, deg).shape == (256, 256)
+
+
+def test_picam_apply_config_repoints_cfg():
+    from config import Config
+    from capture import PiCamCapture
+    cfg = Config()
+    cap = PiCamCapture(cfg.camera, cfg.detector.input_size_px)
+    new = Config()
+    new.camera.rotation_deg = 90
+    cap.apply_config(new.camera)
+    assert cap._cfg.rotation_deg == 90      # live: read per-frame in read_frame

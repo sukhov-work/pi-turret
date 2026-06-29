@@ -141,7 +141,7 @@ def build_pipeline(cfg: Config):
     selector = TargetSelector(cfg.strategy.switch_hysteresis,
                               cfg.strategy.min_target_dwell_frames)
     control = ControlLoop(cfg, servo, selector, sm,
-                          status_led=status_led, aux_marker=aux_marker)
+                          status_led=status_led, aux_marker=aux_marker, pump=pump)
 
     detector = CoralDetector(cfg.detector,
                              frame_width_px=cfg.camera.capture_width_px,

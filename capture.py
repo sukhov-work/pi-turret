@@ -44,6 +44,12 @@ class PiCamCapture(FrameSource):
         self._size = input_size_px
         self._picam = None
 
+    def apply_config(self, cfg: CameraConfig) -> None:
+        """Adopt new camera config live. ``rotation_deg`` is read per-frame so it
+        applies immediately; capture/lores size, format and detection_source are
+        fixed at ``start()`` and need a restart (re-pointed here for persistence)."""
+        self._cfg = cfg
+
     def start(self) -> None:
         try:
             from picamera2 import Picamera2  # lazy: Pi-only

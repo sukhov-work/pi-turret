@@ -24,3 +24,12 @@ def test_frame_dims_fall_back_to_frame_shape_when_unset():
     det = CoralDetector(cfg.detector)
     frame = np.zeros((256, 256), np.uint8)
     assert det._frame_dims(frame) == (256, 256)
+
+
+def test_apply_config_updates_thresholds_live():
+    cfg = Config()
+    det = CoralDetector(cfg.detector)
+    new = Config()
+    new.detector.conf_threshold = 0.55
+    det.apply_config(new.detector)
+    assert det.cfg.conf_threshold == 0.55   # read on the next infer()

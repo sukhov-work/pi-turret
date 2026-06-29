@@ -96,6 +96,13 @@ class CoralDetector(Detector):
         except Exception as exc:  # noqa: BLE001
             raise DetectionError("Coral inference failed") from exc
 
+    def apply_config(self, cfg: DetectorConfig) -> None:
+        """Adopt new detector config live. ``conf_threshold`` / ``iou_threshold`` /
+        ``num_classes`` / ``coords_normalized`` take effect on the next ``infer``;
+        ``model_path`` / ``input_size_px`` / ``backend`` need a restart (the Edge-TPU
+        interpreter is already allocated)."""
+        self.cfg = cfg
+
     def _frame_dims(self, frame: np.ndarray) -> Tuple[int, int]:
         """Full-frame (width, height) the detections map to (configured, else frame)."""
         return (self._frame_width_px or frame.shape[1],

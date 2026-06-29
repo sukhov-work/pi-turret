@@ -50,6 +50,13 @@ class IouTracker:
         self._tracks = []
         self._next_id = 1
 
+    def apply_config(self, cfg) -> None:
+        """Adopt new tracker tunables live (next ``update`` uses them)."""
+        self.iou_threshold = cfg.iou_match_threshold
+        self.max_age_frames = cfg.max_age_frames
+        self.min_hits = cfg.min_hits
+        self.alpha = cfg.velocity_smoothing
+
     def update(self, detections: Sequence[Detection]) -> List[Track]:
         detections = list(detections)
         matches = self._match(detections)

@@ -128,6 +128,40 @@ def test_disarmed_freezes_servo_but_still_reports_aim():
     assert tel.predicted_xy is not None           # where it *would* aim
 
 
+class _FakePump:
+    def __init__(self):
+        self.fires = []
+        self.offs = 0
+
+    def fire(self, dur):
+        self.fires.append(dur)
+
+    def off(self):
+        self.offs += 1
+
+
+def test_manual_fire_pulses_pump_in_any_state():
+    cfg = Config()
+    cfg.fire.fire_duration_s = 0.8
+    drv = FakeDriver()
+    servo = ServoController(drv, cfg.servo)
+    sm = FireStateMachine(cfg.fire)
+    pump = _FakePump()
+    loop = ControlLoop(cfg, servo, TargetSelector(min_target_dwell_frames=1), sm, pump=pump)
+    sm.enter_safe()                                  # disarmed
+    assert loop.manual_fire() is True
+    assert pump.fires == [0.8]                        # fires even while SAFE (manual override)
+    assert loop.manual_pump_off() is True and pump.offs == 1
+
+
+def test_manual_fire_without_pump_is_false():
+    cfg = Config()
+    servo = ServoController(FakeDriver(), cfg.servo)
+    loop = ControlLoop(cfg, servo, TargetSelector(min_target_dwell_frames=1),
+                       FireStateMachine(cfg.fire))
+    assert loop.manual_fire() is False
+
+
 def test_manual_marker_forces_aux_independent_of_state():
     cfg = Config()
     cfg.fire.enabled = False

@@ -33,6 +33,15 @@ class ServoController:
         self._lock = threading.Lock()
         self._last_deg = {Axis.PAN: cfg.home_pan_deg, Axis.TILT: cfg.home_tilt_deg}
 
+    def apply_config(self, cfg: ServoConfig) -> None:
+        """Adopt a new servo config live (clamps / home / pulse mapping / channels).
+
+        Held under the lock so an in-flight write never sees a torn config. i2c bus/
+        address and pwm freq only matter at driver ``setup()`` — those need a restart.
+        """
+        with self._lock:
+            self._cfg = cfg
+
     def _channel(self, axis: Axis) -> int:
         return self._cfg.pan_channel if axis is Axis.PAN else self._cfg.tilt_channel
 

@@ -85,3 +85,14 @@ def test_disarm_relaxes_both_servos():
     sc = ServoController(drv, CFG)
     sc.disarm()
     assert set(drv.relaxed) == {CFG.pan_channel, CFG.tilt_channel}
+
+
+def test_apply_config_swaps_live_clamps():
+    from config import Config
+    cfg = Config()
+    sc = ServoController(FakeDriver(), cfg.servo)
+    new = Config()
+    new.servo.pan_max_deg = 40.0
+    sc.apply_config(new.servo)
+    assert sc._cfg.pan_max_deg == 40.0
+    assert sc.clamp_angle(Axis.PAN, 100.0) == 40.0   # new clamp now in effect

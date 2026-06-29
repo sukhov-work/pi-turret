@@ -46,11 +46,12 @@ class ControlLoop:
     def __init__(self, cfg: Config, servo: ServoController,
                  selector: TargetSelector, state_machine: FireStateMachine,
                  calibration: Optional[Calibration] = None,
-                 status_led=None, aux_marker=None):
+                 status_led=None, aux_marker=None, pump=None):
         self.cfg = cfg
         self.servo = servo
         self.selector = selector
         self.sm = state_machine
+        self._pump = pump          # optional Pump for the manual fire override
         self.cal = calibration or Calibration.from_config(cfg.aim)
         self._frame_w = float(cfg.camera.capture_width_px)
         self._frame_h = float(cfg.camera.capture_height_px)
@@ -78,6 +79,26 @@ class ControlLoop:
         self._aux_enabled = self.cfg.app.aux_marker_enabled
         self.selector.hysteresis = self.cfg.strategy.switch_hysteresis
         self.selector.min_dwell = self.cfg.strategy.min_target_dwell_frames
+
+    def manual_fire(self) -> bool:
+        """Operator-commanded fire: pulse the pump for ``fire.fire_duration_s`` NOW,
+        regardless of arm state / target / kill-zone (the auto interlock is bypassed
+        on purpose — this is the manual trigger). Non-blocking: the pump self-times
+        OFF, so it can never latch on. Returns False if no pump is wired.
+        """
+        if self._pump is None:
+            return False
+        self._pump.fire(self.cfg.fire.fire_duration_s)
+        logger.info("MANUAL FIRE (%.1fs, state=%s)",
+                    self.cfg.fire.fire_duration_s, self.sm.state.value)
+        return True
+
+    def manual_pump_off(self) -> bool:
+        """Force the pump OFF immediately (cancels a manual/auto pulse)."""
+        if self._pump is None:
+            return False
+        self._pump.off()
+        return True
 
     def set_marker(self, on: bool) -> bool:
         """Manually force the aux laser marker on/off (boresight/calibration).

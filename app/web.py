@@ -33,16 +33,17 @@ from errors import ConfigError
 
 logger = logging.getLogger(__name__)
 
-# Sections the web UI may tune at runtime. Hardware/driver sections (servo pins,
-# pump GPIO, camera, detector model, remote) are deliberately excluded — changing
-# them live is unsafe or needs a restart.
-EDITABLE_SECTIONS = (
-    "strategy", "killzone", "predict", "controller", "fire", "aim", "tracker", "app", "stream",
-)
+# Every config section is tunable + persistable from the UI. Changes are validated
+# (Config.validate, with rollback) and re-synced into the live objects where that is
+# safe (see _resync); fields that need a restart to take effect (model_path, capture
+# dims, i2c/pins, ports) still persist and apply on next boot — flagged in the UI docs.
+EDITABLE_SECTIONS = tuple(_SECTIONS)
 
+# Jog directions are physical: UP must raise the aim. On this rig a HIGHER tilt
+# angle points the barrel DOWN, so "up" decreases tilt. Pan keeps +deg = left.
 _JOG = {
-    "up": (Axis.TILT, +1),
-    "down": (Axis.TILT, -1),
+    "up": (Axis.TILT, -1),
+    "down": (Axis.TILT, +1),
     "left": (Axis.PAN, +1),
     "right": (Axis.PAN, -1),
     "stop": (None, 0),
@@ -185,6 +186,13 @@ class TurretWebController:
             self.cfg.fire.enabled = not self.cfg.fire.enabled
         elif code == "center":
             self.control.servo.center()
+        elif code in ("fire_now", "manual_fire"):
+            if not self.control.manual_fire():
+                return {"ok": False, "error": "no pump wired"}
+            return {"ok": True, "command": code}
+        elif code in ("pump_off", "fire_stop"):
+            self.control.manual_pump_off()
+            return {"ok": True, "command": code}
         elif code in ("enable_aux", "enable_aux_laser"):
             self.cfg.app.aux_marker_enabled = True
             self.control.apply_config()
@@ -253,9 +261,29 @@ class TurretWebController:
             setattr(self.cfg, section, old_section)  # rollback
             return {"ok": False, "error": str(exc)}
 
-        self.control.apply_config()  # refresh init-snapshotted values
+        self._resync()  # re-point every live object at the new cfg
         logger.info("config updated: %s <- %s", section, changes)
         return {"ok": True, "section": section, "values": asdict(new_section)}
+
+    def _resync(self) -> None:
+        """After a section swap, re-point every live object at the current cfg so
+        edits to any section take effect immediately where safe. ``ControlLoop``
+        refreshes its own snapshots; the long-lived hardware objects (held by the
+        pipeline) each adopt their section. Restart-only fields are simply re-pointed
+        (no effect until reboot). Missing objects (tests) are skipped.
+        """
+        self.control.apply_config()
+        pipe = self.pipeline
+        self._apply_if(getattr(self.control, "servo", None), self.cfg.servo)
+        self._apply_if(getattr(pipe, "tracker", None), self.cfg.tracker)
+        self._apply_if(getattr(pipe, "capture", None), self.cfg.camera)
+        self._apply_if(getattr(pipe, "detector", None), self.cfg.detector)
+
+    @staticmethod
+    def _apply_if(obj, section_cfg) -> None:
+        fn = getattr(obj, "apply_config", None)
+        if callable(fn):
+            fn(section_cfg)
 
     # ---- calibration + persistence (Phase C) ----
 

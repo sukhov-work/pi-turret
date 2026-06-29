@@ -102,6 +102,15 @@
   .tune label { display:flex; justify-content:space-between; align-items:center; gap:8px; font-size:11px; margin:3px 0; color:var(--dim); }
   .tune input { background:var(--bg); color:var(--bright); border:1px solid var(--line); padding:3px 6px; width:120px; font:inherit; }
   .tune input:focus{ outline:none; border-color:var(--grn-dim); }
+  .info { display:inline-flex; align-items:center; justify-content:center; width:13px; height:13px;
+          margin-left:5px; border:1px solid var(--grn-dim); border-radius:50%; color:var(--grn-dim);
+          font-size:9px; font-style:normal; font-weight:700; line-height:1; cursor:help; user-select:none; flex:none; }
+  .info:hover{ color:var(--grn); border-color:var(--grn); }
+  .fieldname{ display:flex; align-items:center; min-width:0; }
+  #tip { position:absolute; z-index:60; max-width:360px; background:#0c1410; border:1px solid var(--grn-dim);
+         box-shadow:0 8px 28px #000c; padding:9px 11px; font-size:11px; line-height:1.5; color:var(--txt); display:none; }
+  #tip b { display:block; margin-bottom:5px; color:var(--grn); font-size:10px; letter-spacing:.07em; text-transform:uppercase; }
+  #tip .restart{ color:var(--amb); }
 
   #log { font-size:10.5px; color:var(--dim); min-height:14px; }
   #conn { font-size:10px; }
@@ -131,7 +140,7 @@
         <button class="fire" onclick="cmd('enable_fire')">Fire&nbsp;Live</button>
         <button         onclick="cmd('disable_fire')">Fire&nbsp;Safe</button>
         <button onclick="cmd('center')">Center</button>
-        <button onclick="cmd('toggle_fire')">Toggle</button>
+        <button class="fire" onclick="cmd('fire_now')">FIRE</button>
       </div>
     </div>
 
@@ -246,6 +255,145 @@ const $ = (id) => document.getElementById(id);
 const STATE_CLASS = { safe:"", searching:"on", tracking:"on", aiming:"warn", firing:"hot", cooldown:"warn" };
 let SNAP = {}, lastOk = 0;
 let videoOn = false, detvidTimer = null;
+
+// Per-parameter memo. Precise on WHY it exists, HOW it affects the flow, and how it
+// relates to other params. '[restart]' = persists but only takes effect on reboot.
+// Flow: PiCam -> detect -> track -> predict(lead) -> score/select -> calibrate(aim)
+//       -> slew(controller) -> servo clamp -> fire state machine -> pump.
+const PARAM_DOCS = {
+ aim:{
+  pan_coeffs:"Affine pixel->pan map: pan_deg = a*cx + b*cy + c (the three numbers a,b,c). Turns a target's horizontal position in the 1152px detection frame into a pan angle. Normally produced by Calibrate->Fit (least-squares over your clicked points), not hand-edited. b is ~0 unless the camera is rolled. Output is clamped to servo pan_min/max.",
+  tilt_coeffs:"Affine pixel->tilt map: tilt_deg = a*cx + b*cy + c. Vertical twin of pan_coeffs, normally a~0. Set by Calibrate->Fit. Output clamped to tilt_min/max. If aim is biased high/low everywhere, prefer drop_tilt_deg over re-fitting.",
+  parallax_pan_deg:"Constant pan offset (deg) added AFTER calibration to correct the horizontal gap between the camera and the water nozzle (they are not co-located). Trim if shots land consistently left/right of target. Range-dependent (parallax shrinks with distance).",
+  drop_tilt_deg:"Constant 'aim above' (deg) added to tilt to compensate the water jet's gravity drop over flight. Increase to aim higher at longer range. With parallax_pan_deg these are the two manual trims on top of the fitted calibration -- adjust these for first hits instead of re-fitting."
+ },
+ controller:{
+  kp:"Proportional gain (deg per pixel of error) for the OPTIONAL closed-loop pixel-centering trim (PIController). The DEFAULT aim path is calibration feed-forward + slew and does NOT use kp -- this only matters if you switch to the PI trim. Too high oscillates, too low is sluggish.",
+  ki:"Integral gain (deg per pixel*tick) for the PI trim. Removes steady-state aim bias but can wind up / oscillate; 0 disables. Bounded by integral_limit_deg. Only active in the PI trim path.",
+  deadband_px:"Aim-error pixels below which the PI controller does nothing (ignore detector/tracker jitter). Only used by the PI trim. Distinct from fire.aim_deadband_px, which gates firing.",
+  max_step_deg:"Per-tick slew cap (deg): the servo moves at most this many degrees per control tick, on BOTH the default feed-forward aim and the PI trim. Bounds current spikes / overshoot / gear strain and smooths motion. Lower = smoother but slower to settle; compensate with more predict.lead_time_s.",
+  integral_limit_deg:"Anti-windup clamp (deg) on the PI integral's contribution so a long-held error cannot accumulate into a violent jerk. Only relevant when ki>0.",
+  backlash_takeup_deg:"Final-approach overshoot (deg) so the servo always settles from one direction, taking up MG996R gear backlash for repeatable aim. Used by the one-directional approach helper; effect is rig-specific (verify on the Pi)."
+ },
+ predict:{
+  lead_time_s:"How far AHEAD of the target to aim (seconds) so the jet arrives where the bird WILL be. Should be ~ servo travel time + water time-of-flight. Multiplied by track velocity (px/s) to shift the aim point. Too high overshoots fast movers, too low trails them; pairs with controller.max_step_deg (slower slew needs more lead).",
+  fps:"Frame rate (frames/sec) used ONLY to convert tracker velocity (px/FRAME) into px/SEC for the lead calc. Set to the real measured detection FPS (~59 on this rig) or the lead distance is wrong. This is the inference loop's rate, NOT the camera/stream fps."
+ },
+ killzone:{
+  shape:"'rect' or 'circle' -- geometry of the engagement zone in the 1152px frame. A predicted target must land inside it for an auto-shot (if fire.require_killzone), and aim error is measured from its center. rect uses half_w/half_h; circle uses radius.",
+  cx_px:"Kill-zone center X in detection-frame pixels (frame is 1152 wide, so 576 = center). Targets are scored partly by proximity to this point (strategy.w_killzone) and aim error is the distance from the predicted point to here. Move it to bias engagement to a screen region.",
+  cy_px:"Kill-zone center Y in detection-frame pixels (576 = center of the 1152-tall frame). See cx_px.",
+  half_w_px:"Half-width (px) of the RECT kill-zone (full width = 2x). Larger = easier to satisfy 'in kill-zone' (more shots, less precise). Bracket your reliable-hit area. Ignored when shape=circle.",
+  half_h_px:"Half-height (px) of the RECT kill-zone (full height = 2x). See half_w_px. Ignored when shape=circle.",
+  radius_px:"Radius (px) of the CIRCLE kill-zone. Used only when shape=circle; same trade-off as half_w/half_h."
+ },
+ strategy:{
+  w_killzone:"Weight for 'how close to the kill-zone center' in the target score (distance normalized by frame diagonal). Higher = prefer targets already near where you can hit them. Relative to the other w_* (the score is their weighted sum).",
+  w_size:"Weight for target size/closeness (bigger box = nearer/easier). Higher = prefer large/close birds over small/distant ones.",
+  w_dwell:"Weight for how long a track has persisted (hits), saturating at dwell_norm_frames. Higher = prefer established tracks over flickering new ones (less chasing of noise).",
+  w_approach:"Weight for targets moving TOWARD the kill-zone (closing velocity). Higher = prioritize incomers you will soon be able to hit over outgoers.",
+  w_confidence:"Weight for detector confidence (box score). Higher = prefer high-confidence detections, trading aggressiveness for fewer false engagements.",
+  dwell_norm_frames:"Hit count at which the dwell score saturates. Lower = even brief tracks get full dwell credit; higher = only long-lived tracks do. Defines 'established' for w_dwell.",
+  switch_hysteresis:"Score margin a NEW candidate must beat the CURRENT target by before the turret switches. Prevents dithering between similar birds. Works with min_target_dwell_frames; too low = twitchy, too high = sticks to a worse target.",
+  min_target_dwell_frames:"Minimum frames to HOLD the current target before any switch is allowed, even if another scores higher. Time-based anti-flap that pairs with the score-based switch_hysteresis."
+ },
+ fire:{
+  enabled:"Master AUTO-fire arm. False = track/aim and report 'would fire' telemetry but never auto-actuate the pump (safe demo). True = the pump WILL run when the fire predicate is met. The manual FIRE button works regardless of this -- this only governs automatic firing.",
+  fire_duration_s:"How long one shot runs the pump (seconds), for BOTH auto and the manual FIRE button. Non-blocking -- a timer turns it off. Tune to your pump/nozzle for a useful squirt without flooding.",
+  cooldown_s:"Forced wait (seconds) after a shot before the machine can fire again (debounce). Stops continuous-fire on a stationary target and lets pump/tank recover; the state stays COOLDOWN this long.",
+  aim_deadband_px:"Max aim error (px, predicted point to kill-zone center) allowed to take an AUTO shot -- the precision gate. Smaller = only fire when well-aimed (fewer, better shots). Distinct from controller.deadband_px (motion); this one decides firing.",
+  require_killzone:"If true, an auto-shot also needs the PREDICTED position inside the kill-zone, not just small aim error -- belt-and-suspenders with aim_deadband_px. False = fire on aim-error alone, anywhere in frame."
+ },
+ tracker:{
+  iou_match_threshold:"Min box overlap (IoU 0-1) to associate a new detection with an existing track. Higher = stricter (more new IDs, breaks under fast motion); lower = looser (risks merging two birds).",
+  max_age_frames:"How many frames a track survives WITHOUT a matching detection before being dropped -- i.e. how long to coast through an occlusion/miss while keeping the same ID so the predictor can extrapolate. Higher = more persistence but ghosts linger.",
+  min_hits:"Detections required before a track is 'confirmed' and surfaced to targeting. Higher = fewer false tracks from one-frame blips but slower to engage a real new bird. Opposes max_age_frames (confirm vs retain).",
+  velocity_smoothing:"EMA factor (0-1) for the track velocity estimate. Near 1 = react fast but noisy; near 0 = smooth but laggy. Velocity feeds predict(lead), so this affects lead accuracy on maneuvering targets."
+ },
+ servo:{
+  i2c_bus:"[restart] I2C bus of the PCA9685 PWM driver (Pi = bus 1). Hardware wiring; used only at driver init. Must match the physical bus.",
+  i2c_address:"[restart] PCA9685 I2C address (0x40 = 64). Used at init; must match the board's address jumpers. Shares the bus with the LCD (different address).",
+  pwm_freq_hz:"[restart] Servo PWM frequency (50 Hz standard for analog MG996R). Wrong value desyncs the pulse-width<->angle relationship; leave at 50 unless the servo wants otherwise.",
+  pan_channel:"PCA9685 output channel driving the PAN servo (ch1 as wired). Swapping pan/tilt channels swaps the axes. Match your wiring.",
+  tilt_channel:"PCA9685 output channel driving the TILT servo (ch0 as wired). See pan_channel.",
+  pan_min_deg:"SAFETY clamp: every pan command is clamped to [min,max] before it moves -- the MECHANICAL travel envelope. Set to your rig's real left/right limits so auto-aim cannot drive into a hard stop. Use Calibrate->Travel limits (disarmed). Must stay < pan_max.",
+  pan_max_deg:"Upper pan clamp (deg). See pan_min_deg. Must stay > pan_min.",
+  tilt_min_deg:"SAFETY clamp on tilt (deg), like pan. Defines how far the barrel can point; too wide risks hitting the mount or pointing at ground/sky. Calibrate while disarmed.",
+  tilt_max_deg:"Upper tilt clamp (deg). See tilt_min_deg.",
+  pulse_slope_us_per_deg:"Angle->pulse mapping slope: pulse_us = deg*slope + offset, what the PCA9685 actually outputs. This is v1's verified MG996R calibration (2000/180). Wrong values mis-point EVERY command; change only if you re-characterize the servo, and verify on the Pi.",
+  pulse_offset_us:"Offset term of the angle->pulse mapping (501 us on this rig, giving ~556-1023 us over travel). See pulse_slope_us_per_deg.",
+  pulse_min_us:"ABSOLUTE pulse-width guard (us): the final hard safety net -- every output pulse is clamped here regardless of angle, so a bad angle/mapping cannot send a servo-damaging pulse. The deg clamps should bind first. Do not narrow below your real operating range (~556 us) or you cut travel.",
+  pulse_max_us:"Upper absolute pulse guard (us). See pulse_min_us; wide [500,2500] band by design.",
+  home_pan_deg:"The 'Center'/boot rest PAN angle. The turret centers here on startup and on Center. Set to your true forward pose with Calibrate->Set Home (records the current jogged angle), then Save to persist across reboots.",
+  home_tilt_deg:"The 'Center'/boot rest TILT angle. See home_pan_deg."
+ },
+ camera:{
+  detection_source:"[restart] Which camera feeds DETECTION ('picamera2' = the Pi Camera). The USB webcam is the human stream and is NEVER the detection source. Leave on picamera2.",
+  capture_width_px:"[restart] The full-frame coordinate space width (1152) that ALL aiming math, the kill-zone, calibration and the canvas use -- even though inference runs on a smaller lores frame. Changing it rescales every pixel coordinate; if you change it, RE-CALIBRATE.",
+  capture_height_px:"[restart] Full-frame coordinate-space height (1152). See capture_width_px.",
+  lores_format:"[restart] Pixel format of the low-res detection stream -- MUST be YUV420 on Pi 4 (RGB lores is Pi 5 only). The detector uses the Y (luma) plane as greyscale.",
+  fixed_focus:"[restart] If true, lock focus (no autofocus hunting on a moving bird) at lens_position. Recommended for a turret.",
+  lens_position:"Manual focus in DIOPTRES (1/metres) when fixed_focus -- e.g. 4.0 ~= 0.25 m, larger = nearer. Tune to your engagement range for sharp detections. Applies at start.",
+  rotation_deg:"Software rotation of the detection frame (0/90/180/270) to correct a physically rotated module. Read PER-FRAME so it applies live (use the cam-rot buttons). Confirmed 0 here (image already upright). Rotating AFTER calibrating invalidates the fit -- set this first."
+ },
+ detector:{
+  backend:"[restart] Inference backend: coral_yolo (Edge-TPU YOLOv8, default) | coral_mobiledet (fallback) | cpu. Selects the model loader.",
+  model_path:"[restart] Path to the Edge-TPU model -- MUST end '_edgetpu.tflite' or it silently runs on CPU and the Coral is bypassed. The interpreter is loaded once at start. This is the trained bird detector.",
+  input_size_px:"[restart] Square model input size (256); the lores frame is resized to this for inference, then detections are rescaled to capture_width_px. Baked into the compiled model -- must match it.",
+  num_classes:"Number of detector classes (1 = single 'bird'); sets the decode output width [1,4+nc,N]. Applies next infer. Must match the model or scores mis-decode.",
+  conf_threshold:"Min detection confidence (0-1) to keep a box. Higher = fewer false positives but misses faint/distant birds; lower = more detections and more noise for the tracker to filter. Applies live next frame.",
+  iou_threshold:"NMS overlap threshold (0-1): boxes overlapping more than this are merged to one. Lower = more aggressive de-dup (one box per bird); higher = may keep duplicates. Applies live.",
+  coords_normalized:"Whether the model emits box xywh in [0,1] (true) vs input-pixels. PINNED true by the golden fixture for these Ultralytics v8 edgetpu exports -- wrong = boxes mis-decoded by ~1000px (the classic v1 bug). Do not change without re-verifying against a fixture."
+ },
+ stream:{
+  enabled:"Whether the USB-webcam MJPEG stream may run. The human spotter view, independent of detection. False = no stream process.",
+  device:"V4L2 device for the USB webcam (/dev/video0 here -- the UVC cam, NOT the Pi Cam). Must be the webcam node or the stream fails.",
+  width_px:"Webcam stream width (px). Higher = clearer but more USB bandwidth/CPU in the separate mjpg-streamer process; does NOT affect detection. Must be a mode the webcam supports.",
+  height_px:"Webcam stream height (px). See width_px.",
+  fps:"Webcam stream frame rate. Higher = smoother human view, more bandwidth; does not affect detection.",
+  port:"HTTP port mjpg-streamer serves the MJPEG on (8080), separate from the web UI port (8001). The UI's USB-feed image hits this.",
+  binary:"Path to the mjpg_streamer executable. Points at v1's committed ARM build because the bare name is not on PATH -- a wrong path is the FileNotFoundError you hit.",
+  plugin_dir:"Directory holding mjpg-streamer's input_uvc.so / output_http.so plugins (added to LD_LIBRARY_PATH). Must contain the .so files the binary loads.",
+  input_plugin:"mjpg-streamer input plugin (input_uvc.so grabs UVC hardware-MJPEG at low CPU). Rarely changed.",
+  output_plugin:"mjpg-streamer output plugin (output_http.so serves the MJPEG over HTTP). Rarely changed.",
+  www_dir:"Optional web root for mjpg-streamer's built-in pages ('' = stream only, which is all the UI needs)."
+ },
+ app:{
+  annotation_mode:"File-based annotation of SAVED frames: off | fire_frames_only | full_video (for dataset/debug capture to disk). Distinct from the live DET-CAM video toggle. full_video draws on every frame (costly).",
+  snapshot_mode:"Auto-save detection snapshots for the training flywheel: off | every | fire_only | sampled. Writes crops+frames+metadata to snapshot_dir for later labelling.",
+  snapshot_sample_every:"When snapshot_mode=sampled, save 1 of every N frames. Higher = fewer files; throttles disk use on long runs.",
+  snapshot_dir:"Directory snapshots are written to ('dataset'). Ensure free space; feeds later multi-class retraining.",
+  detection_mode:"full_frame (detect every frame, the verified path) | motion_gated (seam to skip static frames and save compute -- not yet active).",
+  stream_source:"Which feed the operator view uses: usb (mjpg-streamer webcam, default) | picam_annotated (debug). The DET-CAM 'video' button is the separate live detection view.",
+  web_port:"[restart] Port the control UI is served on (8001). The startup log prints every reachable URL.",
+  log_level:"Python logging level (INFO/DEBUG/WARNING). DEBUG is verbose (per-tick); INFO is the normal flow (state changes, fire, target events). Applies at start.",
+  detection_video_enabled:"Master gate for the DET-CAM debug JPEG (the raw lores frame under the canvas overlay). OFF by default -- encoding competes with inference (~1% of a core at 5 fps here). The UI 'video' button toggles this.",
+  detection_video_max_fps:"Server-side cap on how often the detection debug JPEG is re-encoded, so a fast browser cannot starve detection. 5 fps is plenty for a debug view.",
+  detection_video_quality:"JPEG quality (1-100) for the detection debug stream. Higher = clearer but bigger/slower; 70 balances well for a 256px frame.",
+  lcd_enabled:"Whether the 1602A I2C LCD is driven (boot/IP, state, target, aim err, fps, shots). Fail-safe -- LCD errors never stop control. False if no LCD fitted.",
+  lcd_refresh_hz:"How often the LCD re-renders (Hz). Deliberately low (~4) so the slow I2C write -- on its own thread -- never blocks the control loop.",
+  status_led_enabled:"Whether the BCM23 status LED is driven (lit while ARMED/not-SAFE). Reused from v1. False to silence it.",
+  aux_marker_enabled:"Whether the BCM27 aux laser may AUTO-light as an aim marker during AIMING/FIRING (opt-in, laser safety). The manual Marker On/Off buttons override this regardless; default off."
+ },
+ pump:{
+  pump_gpio_bcm:"[restart] BCM pin driving the water-pump relay/MOSFET (26 -- v1's 'main laser' pin). MUST go through a relay/MOSFET + flyback diode, never a bare GPIO. The gpiozero device binds at start.",
+  aux_gpio_bcm:"[restart] BCM pin for the aux laser/marker (27, reused from v1). Drives the opt-in/manual aim marker.",
+  status_led_gpio_bcm:"[restart] BCM pin for the status LED (23, reused from v1).",
+  active_high:"[restart] Whether the pump relay energizes on a HIGH (true) or LOW signal -- depends on your relay module. Wrong polarity = pump on when it should be off. Verify carefully; it controls water."
+ },
+ remote:{
+  enabled:"Whether the IR remote listener runs. PROPOSED additive hardware (v1 has no GPIO inputs); needs an IR receiver wired + a dtoverlay. False until fitted.",
+  gpio_bcm:"[restart] BCM pin for the IR receiver (proposed 17, a free pin). Needs /boot/config.txt dtoverlay=gpio-ir. Confirm before wiring.",
+  input_device:"evdev path (/dev/input/eventN) the IR receiver appears as once rc-core is set up (from ir-keytable). Blank until configured.",
+  key_toggle_arm:"IR key name (from ir-keytable, e.g. KEY_POWER) that arms/disarms the turret.",
+  key_enable_fire:"IR key name that toggles AUTO-fire enable.",
+  key_center:"IR key name that centers the turret to home.",
+  key_pan_left:"IR key name that jogs pan left.",
+  key_pan_right:"IR key name that jogs pan right.",
+  key_tilt_up:"IR key name that jogs tilt up.",
+  key_tilt_down:"IR key name that jogs tilt down."
+ }
+};
 
 function log(t, ok){ const e=$("log"); e.textContent=t; e.style.color = ok===false ? "var(--red)" : "var(--dim)"; }
 
@@ -382,7 +530,8 @@ function drawHud(ctx,t,W,H){
 }
 
 function renderTune(){
-  const order=["fire","strategy","killzone","predict","controller","aim","tracker","stream","app"];
+  const order=["aim","controller","predict","killzone","strategy","fire","tracker",
+               "servo","camera","detector","stream","app","pump","remote"];
   $("tune").innerHTML = order.filter(s=>SNAP[s]).map(sec=>{
     const body=Object.entries(SNAP[sec]).map(([k,v])=>{
       const id=`f_${sec}_${k}`;
@@ -391,7 +540,8 @@ function renderTune(){
       else if(Array.isArray(v)) inp=`<input type="text" id="${id}" value="${v.join(", ")}">`;
       else if(typeof v==="number") inp=`<input type="number" step="any" id="${id}" value="${v}">`;
       else inp=`<input type="text" id="${id}" value="${v}">`;
-      return `<label><span>${k}</span>${inp}</label>`;
+      const info=((PARAM_DOCS[sec]||{})[k])?` <i class="info" data-sec="${sec}" data-key="${k}">i</i>`:"";
+      return `<label><span class="fieldname">${k}${info}</span>${inp}</label>`;
     }).join("");
     return `<details><summary>${sec.toUpperCase()}</summary>${body}<button onclick="applySection('${sec}')">Apply ${sec}</button></details>`;
   }).join("");
@@ -470,6 +620,30 @@ async function pollTelemetry(){
   if(t.camera){ [0,90,180,270].forEach(d=>$("rot"+d).classList.toggle("go", t.camera.rotation_deg===d)); }
   drawTactical(t);
 }
+
+// --- parameter info tooltip (hover to peek, click to pin) ---
+const TIP=document.createElement("div"); TIP.id="tip"; document.body.appendChild(TIP);
+let tipPin=null;
+function showTip(el){
+  const sec=el.dataset.sec, key=el.dataset.key, raw=((PARAM_DOCS[sec]||{})[key])||""; if(!raw) return;
+  const restart=/^\[restart\]/.test(raw), doc=raw.replace(/^\[restart\]\s*/,"");
+  TIP.innerHTML=`<b>${sec}.${key}</b>${restart?'<span class="restart">[restart to apply] </span>':''}${doc}`;
+  TIP.style.display="block";
+  const r=el.getBoundingClientRect(), tw=TIP.offsetWidth, th=TIP.offsetHeight, pad=8;
+  let left=r.left-tw-10; if(left<pad) left=Math.min(r.right+10, window.innerWidth-tw-pad);
+  let top=r.top+window.scrollY-2;
+  if(top+th>window.scrollY+window.innerHeight-pad) top=window.scrollY+window.innerHeight-th-pad;
+  TIP.style.left=Math.max(pad,left)+"px"; TIP.style.top=Math.max(pad,top)+"px";
+}
+document.addEventListener("mouseover",e=>{ const el=e.target.closest(".info"); if(el&&!tipPin) showTip(el); });
+document.addEventListener("mouseout",e=>{ if(e.target.closest(".info")&&!tipPin) TIP.style.display="none"; });
+document.addEventListener("click",e=>{
+  const el=e.target.closest(".info");
+  if(el){ const id=el.dataset.sec+"."+el.dataset.key;
+    if(tipPin===id){ tipPin=null; TIP.style.display="none"; } else { tipPin=id; showTip(el); }
+    e.stopPropagation(); return; }
+  if(tipPin && !e.target.closest("#tip")){ tipPin=null; TIP.style.display="none"; }
+});
 
 function pollNow(){ pollTelemetry(); }
 applyVideoState();
