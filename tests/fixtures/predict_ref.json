@@ -1,0 +1,27 @@
+{
+  "input_size_px": 256,
+  "frame_width_px": 1152,
+  "frame_height_px": 1152,
+  "conf": 0.25,
+  "iou": 0.5,
+  "coords_normalized": true,
+  "model": "test-8n-run-1_full_integer_quant.tflite",
+  "image": "5DDTY9C9Y6YS_jpg.rf.4s1hi5Yl5PzFjcffQZP2.jpg",
+  "raw_shape": [
+    1,
+    5,
+    1344
+  ],
+  "boxes": [
+    {
+      "cls_id": 0,
+      "score": 0.6215692758560181,
+      "xyxy": [
+        186.03204345703125,
+        0.0,
+        965.260498046875,
+        1109.172119140625
+      ]
+    }
+  ]
+}

@@ -147,9 +147,18 @@ def decode_v8(
     keep = multiclass_nms(boxes_xyxy, scores, class_ids, iou_threshold)
     keep.sort(key=lambda i: scores[i], reverse=True)
 
+    # Clip to frame bounds (matches Ultralytics' clip_boxes): a box can extend past
+    # the edge when the target is partly out of view; off-frame corners would skew the
+    # centroid the controller aims at. NMS runs on the unclipped boxes, like Ultralytics.
+    max_x = float(frame_width_px)
+    max_y = float(frame_height_px)
     detections: List[Detection] = []
     for i in keep:
         x1, y1, x2, y2 = boxes_xyxy[i]
+        x1 = min(max(float(x1), 0.0), max_x)
+        y1 = min(max(float(y1), 0.0), max_y)
+        x2 = min(max(float(x2), 0.0), max_x)
+        y2 = min(max(float(y2), 0.0), max_y)
         detections.append(
             Detection.from_xyxy(int(class_ids[i]), float(scores[i]), x1, y1, x2, y2)
         )

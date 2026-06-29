@@ -34,7 +34,7 @@ class DetectorConfig:
     num_classes: int = 1                     # single-class "bird"
     conf_threshold: float = 0.25
     iou_threshold: float = 0.5
-    coords_normalized: bool = False          # pinned by the golden fixture on Strix/Pi
+    coords_normalized: bool = True           # golden-fixture pinned: Ultralytics v8 tflite emits normalized xywh
 
 
 @dataclass

@@ -17,7 +17,7 @@ detector:
   num_classes: 1
   conf_threshold: 0.25
   iou_threshold: 0.5
-  coords_normalized: false        # confirmed against model.predict on Strix/Pi
+  coords_normalized: true         # golden-fixture pinned (run1 int8 tflite vs model.predict, Strix)
 
 tracker:
   iou_match_threshold: 0.3
