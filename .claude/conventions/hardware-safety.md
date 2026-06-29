@@ -73,18 +73,29 @@ SAFE; keep the BCM27 aux laser marker OFF unless explicitly enabled in config.
 ## Detector correctness is a safety property
 
 Aiming at garbage is unsafe. The detector is **anchor-free YOLOv8/YOLO11**: output
-`[1, 4+nc, 8400]`, **no objectness channel** (single class = `[1, 5, 8400]`). Decode =
-transpose → `boxes = out[:, :4]` (xywh × input) → `scores = out[:, 4:]` → threshold → NMS.
+`[1, 4+nc, N]`, **no objectness channel** (single class = `[1, 5, N]`; `N = Σ(input/stride)²`, e.g.
+**1344 @256**, 8400 @640). Decode = transpose → `boxes = out[:, :4]` (xywh) → `scores = out[:, 4:]` →
+threshold → NMS → clip to frame. (For our edgetpu export, xywh are **normalized** → `coords_normalized=True`.)
 **Never apply a YOLOv5 (anchor/objectness) decoder** — that was the v1 Coral accuracy bug.
 Unit-test the decode against an Ultralytics `model.predict` reference (see `testing.md`).
 
 ## Coral / Edge-TPU rules
 
 - `edgetpu_compiler` runs **only** on the Strix Halo x86-64 box — never on the Pi or Mac.
-- The compiled file **must end `_edgetpu.tflite`**, or the runtime silently falls back to
-  CPU and the Coral is bypassed.
+- The compiled file must be **the edgetpu artifact** (name contains `_edgetpu`). We load it via
+  **pycoral `make_interpreter`**, which engages the TPU regardless of the exact filename; run-versioned
+  names like `..._edgetpu_run<N>.tflite` are fine. (The stricter "*ends* `_edgetpu.tflite`" rule is an
+  *Ultralytics-AutoBackend* concern — it silently falls back to CPU on a name mismatch — and we don't use
+  AutoBackend on the Pi.)
+- **I/O is INT8, verified on-device (run1):** input tensor is **int8** (scale `1/255`, zero `-128`) — the
+  detector must **quantize the [0,255] frame per the input tensor's dtype/quant** (`coral.py._preprocess`
+  does this); feeding raw uint8 raises `ValueError`. Output is **int8** dequantized to **normalized [0,1]**
+  xywh → `decode_v8(..., coords_normalized=True)`. Output shape `[1,4+nc,N]`, N anchors `= Σ(input/stride)²`
+  (1344 @256). Decode correctness is pinned by the golden fixture (`testing.md`).
 - INT8 export needs **> 300 representative calibration images** matching deployment imagery.
-- Stay on **`libedgetpu1-std`** unless active cooling is added (`-max` overheats unattended).
+- Stay on **`libedgetpu1-std`** unless active cooling is added (`-max` overheats unattended). Keep the
+  Coral on a **USB3** port (≈3× faster than USB2).
+- Full retrain/deploy loop: `claude-docs/MODEL_ITERATION.md`.
 
 ## On-device platform rules
 

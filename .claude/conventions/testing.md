@@ -17,38 +17,48 @@ wasn't measured on the Pi.
 
 ## Directory Structure
 
-Mirror the v2 layer layout:
+**Flat `tests/` — one `test_{file}.py` per module** (mirrors the flat repo-root package layout;
+`pytest.ini` sets `pythonpath = .`). As-built:
 
 ```
 tests/
-    conftest.py             # shared fixtures (fake hardware, sample frame)
-    fixtures/               # a saved frame + its model.predict reference output
-    test_detect/
-        test_decode.py      # the golden v8-decode test (see below)
-        test_nms.py
-    test_aim/
-        test_calibration.py
-        test_controller.py
-    test_strategy/
-        test_fire_state_machine.py
-        test_interlock.py
-    test_actuate/
-        test_clamp.py
+    conftest.py             # shared fixtures + Detection/Track factories (mock hardware, not logic)
+    fixtures/               # generate_golden_fixture.py + raw_output.npy + predict_ref.json
+    test_decode.py          # the golden v8-decode test (see below)
+    test_nms.py
+    test_calibration.py  test_controller.py  test_killzone.py
+    test_scoring.py      test_selector.py    test_tracker.py    test_predict.py
+    test_fire_state_machine.py  test_control_loop.py  test_servo.py  test_pump.py
+    test_lcd.py  test_remote.py  test_streamer.py  test_web.py  test_snapshots.py
+    test_config.py  test_imports.py  test_latest_slot.py
 ```
 
 ## The golden test: decode vs reference
 
 The one test that must never regress — it guards against re-introducing the v5/v8 decoder
-bug that wrecked v1's Coral accuracy:
+bug that wrecked v1's Coral accuracy. It is **live as of run1** (`tests/test_decode.py::
+test_v8_decode_matches_ultralytics_reference`):
 
 ```python
 def test_v8_decode_matches_ultralytics_reference():
-    raw = np.load("tests/fixtures/raw_output.npy")        # saved [1, 5, 8400] tensor
-    expected = json.load(open("tests/fixtures/predict_ref.json"))  # boxes from model.predict
-    dets = decode_v8(raw, conf=0.25, iou=0.5)
-    assert_boxes_close(dets, expected, tol_px=2)
-    # asserts: transposed, NO objectness multiply, xywh*input, correct class index
+    raw = np.load("tests/fixtures/raw_output.npy")          # dequantized model output [1, 5, N]
+    ref = json.load(open("tests/fixtures/predict_ref.json"))  # boxes from Ultralytics predict
+    dets = decode_v8(raw, ref["input_size_px"], ref["frame_width_px"], ref["frame_height_px"],
+                     conf_threshold=ref["conf"], iou_threshold=ref["iou"],
+                     coords_normalized=ref["coords_normalized"])
+    # match count + class + xyxy within abs=2px
 ```
+
+Facts pinned by the run1 fixture (verified on Strix + Pi, 2026-06-29):
+- **Anchor count varies with input size:** `[1,5,1344]` at 256 (`1344 = 32²+16²+8²`), **not 8400**
+  (that's 640). `decode_v8` is anchor-count-agnostic.
+- **`coords_normalized=True`** — Ultralytics v8 *detection* tflite emits xywh in `[0,1]`; the `False`
+  path mis-decodes by ~1100 px. (The `.pt` emits input-pixels — don't capture the fixture from it.)
+- **`decode_v8` clips boxes to frame bounds** (matches Ultralytics `clip_boxes`).
+
+**Regenerate the fixture per model** with `tests/fixtures/generate_golden_fixture.py` (runs on Strix
+against the run's `_full_integer_quant.tflite`; it self-pins `coords_normalized`). Full procedure:
+`claude-docs/MODEL_ITERATION.md`.
 
 ## Fixtures: mock the hardware, not the logic
 

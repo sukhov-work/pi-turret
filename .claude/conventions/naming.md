@@ -24,7 +24,7 @@ constants. Below are the project-specific patterns for the v2 tree.
 | Shared contracts | `contracts.py` or `models.py` | `Detection`, `Track` dataclasses |
 | Config | `config.py` | tunables in one place |
 | Entrypoint | `app/main.py` | Bottle + thread orchestration |
-| Tests | `tests/test_{layer}/test_{file}.py` | `tests/test_detect/test_decode.py` |
+| Tests | flat `tests/test_{file}.py` (one per module) | `tests/test_decode.py`, `tests/test_servo.py` |
 
 ## Classes
 
