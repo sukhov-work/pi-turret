@@ -12,7 +12,7 @@ camera:
 
 detector:
   backend: coral_yolo             # coral_yolo | coral_mobiledet | cpu
-  model_path: models/bird_yolov8n_256_int8_edgetpu.tflite
+  model_path: models/bird_yolov8n_256_int8_edgetpu_run1.tflite
   input_size_px: 256
   num_classes: 1
   conf_threshold: 0.25

@@ -29,7 +29,7 @@ class CameraConfig:
 @dataclass
 class DetectorConfig:
     backend: str = "coral_yolo"              # coral_yolo | coral_mobiledet | cpu
-    model_path: str = "models/bird_yolov8n_256_int8_edgetpu.tflite"
+    model_path: str = "models/bird_yolov8n_256_int8_edgetpu_run1.tflite"
     input_size_px: int = 256                 # YOLOv8n@256 primary; MobileDet uses 320
     num_classes: int = 1                     # single-class "bird"
     conf_threshold: float = 0.25
