@@ -9,3 +9,4 @@ last_servo_state.txt
 /dataset/
 
 /.claude/.env
+/.claude/claude-docs/NEXT_SESSION_PROMPT.md
