@@ -11,6 +11,7 @@ Mac for type-checking and wiring; actual inference is Pi-only truth.
 from __future__ import annotations
 
 import logging
+import os
 from typing import List
 
 import numpy as np
@@ -27,15 +28,16 @@ logger = logging.getLogger(__name__)
 class CoralDetector(Detector):
     def __init__(self, cfg: DetectorConfig):
         self.cfg = cfg
-        if cfg.backend.startswith("coral") and not cfg.model_path.endswith("_edgetpu.tflite"):
-            logger.warning("model_path %s does not end _edgetpu.tflite — the Coral "
-                           "will be bypassed and inference will run on CPU",
+        if cfg.backend.startswith("coral") and "_edgetpu" not in os.path.basename(cfg.model_path):
+            logger.warning("model_path %s has no _edgetpu marker — verify it is the Edge-TPU-"
+                           "compiled model, not a plain tflite (which would run on CPU)",
                            cfg.model_path)
         self._interpreter = None
         self._in_index = None
         self._out_index = None
         self._in_scale = 1.0
         self._in_zero = 0
+        self._in_dtype = np.uint8
         self._out_scale = 1.0
         self._out_zero = 0
 
@@ -57,6 +59,7 @@ class CoralDetector(Detector):
             self._in_index = in_det["index"]
             self._out_index = out_det["index"]
             self._in_scale, self._in_zero = in_det["quantization"]
+            self._in_dtype = in_det["dtype"]
             self._out_scale, self._out_zero = out_det["quantization"]
         except Exception as exc:  # noqa: BLE001
             raise DetectionError(f"failed to load Coral model {self.cfg.model_path}") from exc
@@ -91,4 +94,13 @@ class CoralDetector(Detector):
             frame = np.stack([frame] * 3, axis=-1)
         if frame.shape[0] != size or frame.shape[1] != size:
             frame = cv2.resize(frame, (size, size))
-        return np.expand_dims(frame.astype(np.uint8), axis=0)
+        # The model wants normalized [0,1] input; full-INT8 exports fold that /255 into the
+        # input quantization, so quantize per the tensor's own (scale, zero) + dtype. Feeding
+        # raw uint8 fails on int8-input edgetpu models (Ultralytics exports use zero_point=-128).
+        x = frame.astype(np.float32) / 255.0
+        if self._in_scale:
+            x = x / self._in_scale + self._in_zero
+        if np.issubdtype(self._in_dtype, np.integer):
+            info = np.iinfo(self._in_dtype)
+            x = np.clip(np.round(x), info.min, info.max)
+        return np.expand_dims(x.astype(self._in_dtype), axis=0)
