@@ -189,6 +189,12 @@ Pipelined, not serial. One process, threads sharing **lock-protected single-slot
 - ⏳ PARTIAL — detector latency measured (17 ms); the rest of the per-stage budget (capture, servo travel, end-to-end FPS) still needs the Pi (drives whether 1.10 motion-gating is needed for P1).
 - ⏳ OPEN — real water-stream velocity/range → the lead and aim-above constants (Step 1.6, Pi rig).
 - ⏳ OPEN — snapshot volume/retention policy (SD wear) — sample rate vs fire-only.
+- ✅ RESOLVED — IR receiver pin: **BCM17 / GPIO17 / pin 11** (owner-confirmed); decode stack locked to
+  gpio-ir + rc-core + evdev. Remaining IR items are on-Pi (actual scancodes, rc index, held cadence,
+  EVIOCGRAB, `-D/-P` persistence) — see the IR plan §14.
+- ⏳ OPEN (Step 1.15, decide first) — IR control architecture: **in-process evdev listener** vs. a small
+  **always-on supervisor** that start/stops `turret.service` (the manual-start unit) and injects arm/fire/jog.
+  The supervisor model fits the owner's "separate process manages the main turret process" intent.
 
 ## 8. Build status, wiring, and added steps (updated 2026-06-29)
 
@@ -252,13 +258,23 @@ box has untracked files in the path being checked out (e.g. fixtures the generat
 | 1.12 USB-webcam streamer | **DONE + Pi-VERIFIED 2026-06-29** | `/dev/video0`=UVC cam; streamer launches → HTTP 200 MJPEG → stops; binary = v1's committed ARM `_build/mjpg_streamer` |
 | 1.13 LCD lifecycle display (`actuate/lcd.py`, `app/display.py`) | **DONE (Mac logic)** | verify on real LCD (Pi) |
 | 1.14 status LED + aux marker (`actuate/indicators.py`) | **DONE (Mac)** | verify BCM23/27 (Pi) |
-| 1.15 IR remote (`app/remote.py` seam + `RemoteConfig`) | **SEAM ONLY** | owner: confirm pin; capture keys (Pi) |
+| 1.15 IR remote (`app/remote.py` + `RemoteConfig`) | **PLANNED → buildable** (pin GATE cleared: BCM17/GPIO17/pin11; stack = gpio-ir+rc-core+evdev; bare VS1838B + RC filter, breakout lost) | OS/keytable + listener + MANUAL state + manual fire on Pi; tune jog on rig. **Next phase** — plan: `claude-docs/plans/moniotoring-and-remote/ir-remote-integration-plan.md` |
+| 1.16 Monitoring (Alloy → Grafana Cloud) + `turret.service` | **DONE + Cloud-VERIFIED 2026-06-29** | Alloy v1.17 ships node/log/turret metrics; manual-start `turret.service`. Ops: `monitoring/README.md` |
 
 **Open flags:** (a) ✅ RESOLVED 2026-06-29 — `decode_v8.coords_normalized` is **pinned `True`** by the
 landed golden fixture (`tests/fixtures/raw_output.npy` + `predict_ref.json`); Ultralytics v8 tflite
 exports emit normalized xywh. (b) servo pulse band — docs
 cite ~1000–2000 µs but v1 actually runs ~556–1023 µs, so v2 keeps v1's mapping + a `[500,2500] µs`
 guard (re-measure on Pi).
+
+### Operations: monitoring + turret.service (NEW — live 2026-06-29)
+The dead Grafana Agent was removed and replaced by **Grafana Alloy v1.17** on the Pi, shipping system
+metrics (node_exporter + systemd liveness), journald + `/var/log` logs, and **log-derived turret
+telemetry** to Grafana Cloud (stack `mellowmushroom1792`). Verified end-to-end in Cloud (~740 series).
+The turret app now also has a **manual-start systemd unit** (`turret.service`: `User=jayson`,
+`python3 main.py`, installed but **NOT enabled** — a later phase's supervisor will manage it). Both the
+Alloy config and the unit are version-controlled in **`monitoring/`** (deploy: `monitoring/deploy.sh`);
+full ops doc + importable dashboards in `monitoring/README.md`. Serena: `mem:decisions/monitoring`.
 
 ### Wiring map (FIXED — verified from v1 source, do NOT rewire)
 From `v1/TurretHandler.py:40-51` + `v1/PCA9685.py:32`. v2 reuses every pin; **escalate before any rewire.**
@@ -272,9 +288,9 @@ New hardware is **additive on free pins only.**
 | Water pump (was "main laser") | GPIO **BCM 26** (relay/MOSFET + flyback) | `actuate/pump.py` |
 | Aux laser / aim marker | GPIO **BCM 27** (opt-in) | `actuate/indicators.py` |
 | Status LED | GPIO **BCM 23** | `actuate/indicators.py` |
-| IR receiver (PROPOSED) | GPIO **BCM 17** (free; confirm) | `app/remote.py` |
+| IR receiver — **CONFIRMED** (BCM17/GPIO17/**pin 11**) | GPIO **BCM 17** (`dtoverlay=gpio-ir`; bare VS1838B + RC filter, breakout lost; owner-locked pin order SIGNAL·GND·VCC) | `app/remote.py` |
 
-Free pins besides BCM17: 4/5/6/12/13/16/18/19/20/21/22/24/25 + SPI block. BCM 2/3 = I2C; 23/26/27 in use.
+Free pins besides BCM17: 4/5/6/12/13/16/18/19/20/21/22/24/25 + SPI block. BCM 2/3 = I2C; **17 (IR)**/23/26/27 in use.
 
 ### Step 1.13 — LCD lifecycle display *(done on Mac; verify on Pi)*
 - **Goal:** surface useful info throughout the run on the 1602A (16×2): boot + LAN IP, then per state —
@@ -291,18 +307,27 @@ Free pins besides BCM17: 4/5/6/12/13/16/18/19/20/21/22/24/25 + SPI block. BCM 2/
 - **Files:** `actuate/indicators.py` (`GpioOutput`, `gpiozero.LED` like v1); toggled in `ControlLoop`.
 - **Validation:** unit-tested status-LED-tracks-state + fail-safe; on-Pi confirm BCM23/27 behavior.
 
-### Step 1.15 — IR remote control *(PROPOSED — seam only)*
-- **Goal:** start/stop + basic control (arm/disarm, toggle fire-enable, center, jog pan/tilt) from a simple
-  IR remote (owner's old Arduino kit). v1 has **no GPIO inputs**, so this is purely additive.
-- **Approach (decide on Pi):** rc-core + evdev via `dtoverlay=gpio-ir,gpio_pin=17` (recommended on
-  Bullseye) → remote shows up as `/dev/input/eventN`; capture key names with `ir-keytable -t`. Alternatives:
-  LIRC, or pigpio software decode (no overlay).
-- **Files:** `app/remote.py` (`RemoteActions` ABC, `build_key_map` pure, `RemoteListener` evdev thread,
-  lazy import), `RemoteConfig` in `config.py`, `TurretRemoteActions` in `main.py`.
-- **GATE (owner):** confirm the receiver pin (proposed **BCM 17**) and add the dtoverlay; then capture the
-  remote's key codes on the Pi and fill `RemoteConfig` key fields.
-- **Validation:** `build_key_map` unit-tested; on-Pi a key-down dispatches its action without affecting the
-  control loop; remote errors are best-effort (never crash control).
+### Step 1.15 — IR remote control *(BUILDABLE — NEXT PHASE; full plan is the authority)*
+The complete, buildable plan lives at
+**`claude-docs/plans/moniotoring-and-remote/ir-remote-integration-plan.md`** (hardware, decode stack,
+`RemoteConfig`, `app/remote.py` skeleton, MANUAL state, button map, sub-steps 1.15.0–1.15.7, hard-constraint
+checklist). This section is just the summary; build from that doc.
+- **Goal:** arm/disarm, e-stop, toggle fire-enable, HOME, FIRE, and jog pan/tilt (nudge + hold-to-slew) from
+  the owner's 21-key NEC remote; new MANUAL state suspends auto-aim. Additive (v1 has no GPIO inputs).
+- **Stack — LOCKED:** kernel `gpio-ir` overlay + rc-core + `ir-keytable` + python-evdev (daemon-free in-kernel
+  NEC decode; LIRC/pigpio rejected). Remote appears as `/dev/input/eventN` (resolve by driver name, index drifts).
+- **Hardware — GATE CLEARED:** bare **VS1838B on GPIO17 / pin 11** @ 3.3 V (breakout PCB lost → add a
+  replacement RC supply filter: 100 Ω series in VCC + 0.1 µF, +4.7–10 µF bulk). Pin order owner-locked SIGNAL·GND·VCC.
+- **Files:** `app/remote.py` (`RemoteActions` ABC, pure `build_key_map`, `RemoteListener` evdev thread, lazy
+  import), `RemoteConfig` in `config.py`/`config.yaml`, `TurretRemoteActions` in `main.py`, shared command slots
+  in `app/pipeline.py`, MANUAL in `app/statemachine.py`/`app/control.py`. Ships `enabled=False` by default.
+- **First design decision (resolve with owner):** in-process evdev listener (per the plan) vs. a small
+  always-on **supervisor** process that also start/stops `turret.service` — the manual-start service built this
+  session + the owner's "separate process to manage the main turret process" point toward the supervisor model.
+  See the NEXT_SESSION_PROMPT for the framing.
+- **Validation:** `build_key_map` unit-tested on Mac; on-Pi a key-down dispatches its intent without the listener
+  ever touching servos/pump (control thread stays the single mover); manual jog within clamps; fire stays
+  non-blocking + honors fire-enable/cooldown; remote faults are best-effort (never crash control).
 
 ## 9. Detector Build Track — ✅ **COMPLETE (2026-06-29)**
 

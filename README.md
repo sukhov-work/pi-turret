@@ -85,6 +85,19 @@ Prefer `mosh` + `tmux` for long sessions; rsync/scp is for large artifacts only 
 **disabled by default** (`fire.enabled: false` in `config.yaml`) — "would-fire" telemetry only, for safe
 bring-up. All tunables live in `config.py` / `config.yaml`.
 
+### Run as a service + monitoring (on the Pi)
+The app can run by hand (`python3 main.py`) or as a **manual-start systemd unit** (boots DISARMED;
+stops cleanly via SIGTERM → servos centered, pump OFF):
+```bash
+sudo systemctl start turret      # not enabled on boot — start it yourself
+journalctl -u turret -f          # live logs
+sudo systemctl stop turret
+```
+**Grafana Alloy** on the Pi ships system metrics, logs, and log-derived turret telemetry
+(`turret_fire_events_total`, aim error, state/target events) to **Grafana Cloud**. Config, importable
+dashboards, and the full ops doc live in **`monitoring/`** (start at `monitoring/README.md`); the
+Grafana Cloud token stays in `/etc/alloy/secrets.env` (never committed).
+
 ### Wiring (FIXED — reused from v1, do NOT rewire; escalate first)
 | Function | Bus / pin |
 |---|---|
