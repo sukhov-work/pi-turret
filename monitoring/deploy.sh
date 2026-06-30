@@ -21,10 +21,10 @@ sudo mkdir -p /etc/rc_keymaps
 sudo install -m 0644 rc_keymaps/pi_turret.toml     /etc/rc_keymaps/pi_turret.toml
 chmod +x ir-load-keytable.sh
 
-if [ ! -f /etc/alloy/secrets.env ]; then
+if ! sudo test -f /etc/alloy/secrets.env; then
   echo "!! /etc/alloy/secrets.env missing — copy secrets.env.example there, chmod 600, and fill it."
   exit 1
-fi
+fi  # NB: /etc/alloy is root-only, so test as root — a bare [ -f ] runs as the deploy user and false-negatives.
 
 echo "==> validating config.alloy (secrets sourced)"
 sudo bash -c 'set -a; . /etc/alloy/secrets.env; set +a; alloy validate /etc/alloy/config.alloy'
