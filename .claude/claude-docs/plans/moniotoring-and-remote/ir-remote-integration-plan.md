@@ -1,436 +1,220 @@
-# pi-turret v2 — Step 1.15 IR Remote Control — Implementation Plan (agent handoff)
+# pi-turret v2 — Step 1.15 IR Remote Control — AS-BUILT
 
-> ## ⚠️ SUPERSEDED IN TWO PLACES (2026-06-30) — read this first
-> 1. **Pin: BCM25 / GPIO25 / pin 22**, not BCM17/pin11. The owner wired the VS1838B signal to **BCM25**;
->    use `dtoverlay=gpio-ir,gpio_pin=25`. All "GPIO17 / pin 11" references below are stale — read them as BCM25.
-> 2. **Architecture: a separate always-on SUPERVISOR daemon**, not the in-process `app/remote.py` listener.
->    Built as `turret-remote.service` (root) → `remote_daemon.py` → `app/remote_supervisor.py`: it owns the IR
->    device, the POWER key (`0`) runs `systemctl start/stop turret.service`, and every other key is forwarded as
->    an HTTP POST to the running app's web API on :8001 (`/api/cmd`, `/api/control-cmd`). The decode stack,
->    scancode-capture procedure, keytable, `RemoteConfig` fields, button map, and hard-constraint checklist below
->    are all still correct and reused. The §6–§9 *in-process* code (RemoteActions thread, shared slots, MANUAL
->    state in control.py) is **deferred** — jog currently forwards to `/api/control-cmd` (disarmed only).
->    Authority for the as-built design is now `IMPLEMENTATION_PLAN.md` Step 1.15. See `DECISIONS.md` 2026-06-30.
-
-> **Placement:** `.claude/claude-docs/plans/moniotoring-and-remote/ir-remote-integration-plan.md` (alongside the original `migrate-to-allow.md` draft).
-> **Status:** ready to build. Expands `IMPLEMENTATION_PLAN.md` **Step 1.15** from *SEAM ONLY* to a full buildable step. Phase-1 stretch feature (process control = must-have; manual steering = stretch).
-> **Source-of-truth split:** this doc = *what to build*. `pi-turret-v1-asbuilt.md` = *what exists* (wiring/GPIO, §3/§13). The research report *"Integrating a 21-Key NEC IR Remote on Raspberry Pi 4 / Bullseye"* = *why* (full decode-stack comparison, exhaustive scancode table, NEC timing derivations) — this plan carries only the buildable essentials and points there for rationale.
-> **Conventions:** every step lists goal · files · machine · validation · rollback. Machines per the three-machine model: **Mac** (author + pure-logic pytest), **Strix** (x86-64 model/compile — irrelevant here), **Pi** (`jayson@pi-jayson.local`, the only hardware truth). Confidence labels: **[VERIFIED]** primary/2-source · **[INFERRED]** · **[UNVERIFIED]** · **[ASSUMPTION]**.
+> **Status: BUILT + VERIFIED on-Pi (2026-06-30).** This was a "plan to build" doc; it now records
+> what shipped. Authority for the as-built design is `IMPLEMENTATION_PLAN.md §1.15`; durable on-Pi
+> truth + gotchas live in Serena `mem:decisions/ir_remote`; chronology in `DECISIONS.md` (2026-06-30).
+> The original research report ("Integrating a 21-Key NEC IR Remote on Pi 4 / Bullseye") holds the
+> deep *why* (decode-stack comparison, NEC timing). This file = the buildable + verified essentials.
 
 ---
 
-## 0. What changed this revision (hardware correction)
+## 1. Architecture — separate SUPERVISOR daemon (not an in-process listener)
 
-The intermediate **IR receiver breakout PCB is lost** (the "遥控模块 / remote-control module" board: VCC·GND·OUT pads, a 3-pin header, a red indicator LED). It is **not required**. The bare 3-pin **VS1838B** still in hand *is* the receiver and connects directly to the Pi. The only thing worth replacing is the breakout's **on-board RC supply filter** (two passives, §1.2). Pin identity is **confirmed**: the overlay's `gpio_pin=17` means **BCM 17 = GPIO 17 = physical pin 11** (not physical pin 17, which is a 3V3 rail). **[VERIFIED]** Bare-device **pin order is locked by the owner** to the standard VS1838B front-view order **SIGNAL–GND–VCC** (lens facing you, legs down); see §1.3. **[ASSUMPTION — owner-provided, matches datasheet]**
+The owner wanted a separate process to **manage the main turret app** (turn it on/off). Two hard facts
+forced the architecture:
+- Only **one** process can `EVIOCGRAB` the IR `/dev/input/eventN` device.
+- Only an **always-on** process can `systemctl start turret.service` while the app is STOPPED.
 
-No change to: decode stack, scancode-capture procedure, `RemoteConfig`/intent-slot/state-machine design, button map, or the manual-steering feasibility verdict.
+So IR lives in an always-on supervisor, **not** an in-process thread:
+
+```
+21-key NEC remote
+      │  (IR)
+      ▼
+VS1838B on BCM25 ──► kernel gpio-ir + rc-core ──► /dev/input/eventN  (KEY_* events, NEC keytable)
+                                                        │  (EVIOCGRAB, exclusive)
+                                                        ▼
+                              turret-remote.service  (root, enabled on boot)
+                              = remote_daemon.py → app/remote_supervisor.py
+                                    │                         │
+                   POWER key "0" ───┘                         └─── every other key
+                          │                                            │
+                          ▼                                            ▼
+              systemctl start/stop                       HTTP POST → running app :8001
+                turret.service                           /api/cmd · /api/control-cmd
+                (the main app)                           (the routes the web UI already uses)
+```
+
+The supervisor **never** touches PCA9685/pump/servos — the app's control thread stays the single mover.
+It only starts/stops the unit and POSTs intents the app already exposes. Everything is best-effort
+(every dispatch + the read loop is try/excepted; a remote/app/systemctl fault never crashes anything).
+`evdev` is imported lazily, so the module imports + unit-tests on the Mac.
+
+The in-process `app/remote.py` listener (`RemoteActions`/`build_key_map`/`RemoteListener`) is kept as a
+**dormant seam** but is **no longer wired in `main.py`** — `remote.enabled=true` activates only the
+supervisor (two processes can't both own the device).
+
+### Intent semantics (`app/remote_supervisor.py`)
+| Intent | Action |
+|---|---|
+| `POWER_TOGGLE` | `systemctl is-active` → `start` if stopped else `stop` `turret.service` |
+| `ARM_TOGGLE` | `GET /api/turret-state` → POST `arm` or `disarm` to `/api/cmd` |
+| `TOGGLE_FIRE_ENABLE` | POST `toggle_fire` |
+| `HOME` | POST `center` |
+| `FIRE` | POST `fire_now` |
+| `ESTOP` | POST `pump_off` **then** `disarm` (de-energize first) |
+| `JOG_PAN_±` / `JOG_TILT_±` | POST `left/right/up/down` to `/api/control-cmd` — **accepted only when DISARMED** |
+
+`http_plan(intent)` (pure, Mac-tested) builds the static POSTs; `ARM_/POWER_` toggles read live state first.
 
 ---
 
-## 1. Hardware (REVISED — bare VS1838B, no breakout)
+## 2. Hardware (final, verified)
 
-### 1.1 What the lost board did vs the bare part
-The breakout = VS1838B + **RC supply filter** ("On-board RC filter, work more stable" per the WCON module description) + a signal/power **indicator LED** + a male **header**. The LED and header are convenience only. The RC filter is the one electrically meaningful loss for an unattended outdoor unit (the VS1838B's internal AGC is supply-noise sensitive). **[VERIFIED]**
+- **Receiver:** bare **VS1838B** (the breakout PCB was lost — not needed). Pin order **SIGNAL · GND · VCC**
+  (front view, lens toward you, legs down — standard datasheet order; back side mirrors).
+- **Signal → BCM25 / GPIO25 / physical pin 22.** `dtoverlay=gpio-ir,gpio_pin=25` in **`/boot/config.txt`**
+  (Bullseye — *not* `/boot/firmware/`). Verified: dmesg `ir-receiver@19` (0x19 = 25); `rc0 = gpio_ir_recv`,
+  `/dev/lirc0`; BCM25 idles HIGH (overlay enables the internal pull-up).
+- **VCC → 3V3 via a replacement RC supply filter** (the breakout's filter): **100 Ω series in VCC** +
+  **0.1 µF** to GND + **4.7–10 µF** bulk to GND. 3.3 V is in spec; OUT swings 0–3.3 V → MCU-safe, no level
+  shifter. First-power sanity (reversed VCC/GND silently kills the part): OUT idles HIGH, dips LOW on a press.
+- Protocol = **NEC**. No external pull-up needed.
 
-### 1.2 Wiring (bare device + replacement RC filter)
-Add, right at the device legs:
-- **100 Ω in series** with VCC (forms a low-pass with the cap; also limits fault current during pin-verification), and
-- **0.1 µF ceramic** between the device VCC pin and GND, ideally **plus a 4.7–10 µF** electrolytic/ceramic in parallel for bulk.
+---
 
-This reproduces the datasheet application circuit ("a 100 Ω resistor in series with VCC and a 4.7 μF capacitor between VCC and GND") and the breakout's filter. Skipping it risks false triggers / reduced range under a noisy supply or strong ambient IR (sunlight). **[VERIFIED]**
+## 3. Decode stack — `gpio-ir` + rc-core + `ir-keytable` + python-evdev
 
-**Pin order (locked, owner-confirmed):** front view — lens facing you, legs pointing down — **left = SIGNAL/OUT, middle = GND, right = VCC**. This is the standard VS1838B datasheet order. (From the **back/flat** side the order mirrors to VCC–GND–SIGNAL — don't wire from that side by mistake.)
+Kernel decodes NEC in-ISR; the remote appears as `/dev/input/eventN`; the supervisor reads `KEY_*` via
+evdev. Daemon-free, negligible CPU. (LIRC's GPIO path is deprecated; pigpio needs root for DMA — both rejected.)
 
-| Bare VS1838B leg | Connects to | Pi pin | Notes |
+The keytable maps scancodes → `KEY_*`; `RemoteConfig` maps `KEY_*` → intent (config.py defaults ==
+`/etc/rc_keymaps/pi_turret.toml`). Loaded at boot by **`pi-turret-ir.service`** (oneshot) →
+**`monitoring/ir-load-keytable.sh`**, which resolves the rc device **by name `gpio_ir_recv`** (the rcN
+index drifts — vc4-hdmi CEC also registers rc devices) and runs
+`ir-keytable -s rcN -c -p nec -w <toml> -D 150 -P 110`.
+
+---
+
+## 4. Scancode reference — VERIFIED on this unit (2026-06-30)
+
+`ir-keytable -t` prints the bare NEC command byte (address `0x00`). Captured + read-back confirmed all 19
+map correctly; the mapped controls match the documented table exactly.
+
+| Button | scancode → KEY_* | Button | scancode → KEY_* |
 |---|---|---|---|
-| **OUT** | GPIO 17 | **pin 11** (BCM 17) | active-low demodulated signal; 0–3.3 V, MCU-safe |
-| **GND** | Ground | pin 6/9/14/… | common ground |
-| **VCC** | 3V3 (via 100 Ω) | pin 1 or 17 | power at 3.3 V; **do not** feed 5 V to a part whose OUT then drives the Pi |
+| CH− | `0x45` → KEY_STOP | `−` | `0x07` → KEY_VOLUMEDOWN |
+| CH | `0x46` → KEY_HOMEPAGE | `+` | `0x15` → KEY_VOLUMEUP |
+| CH+ | `0x47` → KEY_CHANNELUP | EQ | `0x09` → KEY_MODE |
+| ∣◀◀ | `0x44` → KEY_PREVIOUS | `0` | `0x16` → KEY_NUMERIC_0 |
+| ▶▶∣ | `0x40` → KEY_NEXT | 1/2/3 | `0x0c`/`0x18`/`0x5e` (spare) |
+| ▶∥ | `0x43` → KEY_PLAYPAUSE | 4–9 | `0x08`/`1c`/`5a`/`42`/`52`/`4a` (spare) |
 
-- **3.3 V is in spec** (VS1838B working voltage 2.7–5.5 V) and the output swings 0–3.3 V → safe for Pi GPIO; no level shifter. **[VERIFIED]**
-- **No external pull-up needed:** the `gpio-ir` overlay enables the internal pull-up (`gpio_pull=up` default) and the VS1838B output idles HIGH. If reception is flaky on this clone, a 10 kΩ OUT→3V3 pull-up is the documented fallback. **[VERIFIED]**
-- Optional 100 Ω–1 kΩ in the **OUT** line as a low-pass if you later run a long lead to the receiver (>1 m). **[INFERRED]**
-
-### 1.3 Pinout (LOCKED — owner-confirmed)
-**Order: SIGNAL/OUT · GND · VCC**, left→right when viewing the **front** (domed lens toward you, legs down). Matches the standard VS1838B datasheet pinout. **[ASSUMPTION — owner-provided]**
-
-Wire per §1.2. One sanity check on first power (because reversed VCC/GND destroys the part silently): with the 100 Ω series R in VCC limiting fault current, confirm **OUT idles HIGH (~3.3 V)** and dips LOW on a remote press before trusting it; then `ir-keytable -t` (§4) decoding clean NEC confirms wiring + protocol end-to-end. If OUT sits at 0 V or the part warms up, kill power and re-check orientation (front vs back mirror).
+Recapture if ever needed: `sudo ir-keytable -s rcN -c -p nec -t`, press each button. (Earlier empty
+captures were just press-timing — `-p nec` decodes fine.)
 
 ---
 
-## 2. Decode stack — LOCKED: `gpio-ir` + rc-core + `ir-keytable` + python-evdev
+## 5. Button → intent map (as-built)
 
-Kernel decodes NEC in-ISR; the remote appears as `/dev/input/eventN`; Python reads `KEY_*` events via evdev. **No daemon, negligible CPU, and it is exactly the `app/remote.py` evdev seam** already planned. LIRC's GPIO path is deprecated on mainline; pigpio needs root for DMA. Full comparison table in the research report. **Confidence: [VERIFIED]** (Raspberry Pi `boot/overlays/README`; rc-core/ir-keytable docs).
-
----
-
-## 3. Bring-up runbook (Pi) — exact commands
-
-```bash
-# 3.1 Overlay — Bullseye uses /boot/config.txt (NOT /boot/firmware/config.txt; that's Bookworm) [VERIFIED]
-echo 'dtoverlay=gpio-ir,gpio_pin=17' | sudo tee -a /boot/config.txt
-sudo reboot
-
-# 3.2 Find the receiver — the rc index is NOT stable (vc4-hdmi CEC also registers as an rc device).
-#     ALWAYS resolve by driver name 'gpio_ir_recv', never assume rc0/event0. [VERIFIED]
-ir-keytable                      # look for: Driver: gpio_ir_recv ... /dev/input/eventN, /dev/lircN
-for d in /sys/class/rc/rc*; do printf '%s -> ' "$d"; \
-  cat "$d"/input*/name 2>/dev/null; done   # crude name->index resolver
-
-# 3.3 Enable NEC + raw/decoded test (default keymap is rc6-mce → your NEC decodes to NOTHING until enabled) [VERIFIED]
-sudo ir-keytable -s rcN -c -p nec -t        # press buttons; expect: protocol(nec): scancode = 0x..
-# if nothing decodes, discover the real variant:
-sudo ir-keytable -s rcN -c -p all -t
-# raw pulse check (sanity that the diode + wiring work at all):
-ir-ctl -r -d /dev/lircN
-
-# 3.6 Permissions — reading /dev/input/eventN requires the 'input' group (nodes are root:input 0660).
-#     The 'pi'/'jayson' user is typically already in 'input'. Otherwise: [VERIFIED]
-sudo usermod -aG input "$USER"      # re-login to take effect
-```
-
-Keytable + auto-load (systemd oneshot — preferred over the flaky udev `rc_maps.cfg` path):
-```toml
-# /etc/rc_keymaps/pi_turret.toml   (see §4 for the full button set; VERIFY scancodes per unit)
-[[protocols]]
-name = "pi_turret"
-protocol = "nec"
-variant = "nec"
-[protocols.scancodes]
-0x45 = "KEY_STOP"          # CH-   -> ESTOP
-0x47 = "KEY_CHANNELUP"     # CH+   -> ARM toggle
-0x46 = "KEY_HOMEPAGE"      # CH    -> HOME / center
-0x44 = "KEY_PREVIOUS"      # |<<   -> JOG_PAN-
-0x40 = "KEY_NEXT"          # >>|   -> JOG_PAN+
-0x43 = "KEY_PLAYPAUSE"     # >||   -> FIRE
-0x07 = "KEY_VOLUMEDOWN"    # -     -> JOG_TILT-
-0x15 = "KEY_VOLUMEUP"      # +     -> JOG_TILT+
-0x09 = "KEY_MODE"          # EQ    -> TOGGLE_FIRE_ENABLE
-0x16 = "KEY_NUMERIC_0"     # 0     -> MANUAL toggle
-0x0c = "KEY_NUMERIC_1"
-0x18 = "KEY_NUMERIC_2"
-0x5e = "KEY_NUMERIC_3"
-```
-```ini
-# /etc/systemd/system/pi-turret-ir.service
-# -D/-P set the autorepeat delay/period low so hold-to-slew starts fast (see §11).
-# NOTE: -P changes are unreliable on some drivers and may not persist — verify with `ir-keytable` after boot. [VERIFIED]
-[Unit]
-Description=Load pi-turret IR keytable
-After=multi-user.target
-[Service]
-Type=oneshot
-# If rc index drifts, replace `-a` auto with a name-resolver wrapper that passes `-s rcN`.
-ExecStart=/usr/bin/ir-keytable -a /etc/rc_keymaps/pi_turret.toml -D 150 -P 110
-[Install]
-WantedBy=multi-user.target
-```
-```bash
-sudo systemctl enable --now pi-turret-ir.service
-```
-
----
-
-## 4. Scancode reference (compact) + capture
-
-rc-core reports the **LSB-first NEC command byte** (the bit-reversal of the Arduino-IRremote MSB byte); this clone's NEC address is `0x00`, so `ir-keytable -t` prints the bare command byte (`0x45`-style). **The number keys are exact/verified; the prev/next/play labels can differ between print-variants — capture on YOUR unit.** **[VERIFIED for digits; UNVERIFIED per-unit for transport keys]**
-
-| Button | rc-core `nec` scancode | Button | scancode | Button | scancode |
-|---|---|---|---|---|---|
-| CH− | 0x45 | − | 0x07 | 3 | 0x5e |
-| CH | 0x46 | + | 0x15 | 4 | 0x08 |
-| CH+ | 0x47 | EQ | 0x09 | 5 | 0x1c |
-| \|<< | 0x44 | 0 | 0x16 | 6 | 0x5a |
-| >>\| | 0x40 | 100+ | 0x19 | 7 | 0x42 |
-| >\|\| | 0x43 | 200+ | 0x0d | 8 | 0x52 |
-| 1 | 0x0c | 2 | 0x18 | 9 | 0x4a |
-
-Capture: `sudo ir-keytable -s rcN -c -p nec -t`, press each physical button, record the `scancode =` line, write into the `.toml`. NEC repeat frames are consumed by the kernel as autorepeat (no `0xFFFFFFFF` surfaces). **[VERIFIED]**
-
----
-
-## 5. Build steps (sub-steps of 1.15)
-
-| # | Step | Goal | Files | Machine | Validation | Rollback |
-|---|---|---|---|---|---|---|
-| 1.15.0 | Hardware | Bare VS1838B + RC filter wired; pinout verified | — (bench) | **Pi** | OUT idles HIGH, dips on press; `ir-ctl -r` shows pulses | unplug; feature off |
-| 1.15.1 | OS/keytable | Overlay + NEC keytable auto-loaded; perms | `/boot/config.txt`, `/etc/rc_keymaps/pi_turret.toml`, systemd unit, udev/group | **Pi** | `ir-keytable -t` decodes every mapped button; device resolvable by name | remove overlay line + service |
-| 1.15.2 | `RemoteConfig` | Typed config (Py3.9, no unions) incl. key→intent map, jog params, toggle keys | `config.py`, `config.yaml` | **Mac** | loads, validates, round-trips; override via `config.local.yaml` | drop block |
-| 1.15.3 | Listener + actions | `RemoteActions` ABC, **pure** `build_key_map`, `RemoteListener` evdev daemon (lazy evdev import) | `app/remote.py` | **Mac** (logic) + **Pi** (live) | `build_key_map` unit-tested on Mac; on-Pi key-down dispatches intent without touching servos | disable `remote.enabled` |
-| 1.15.4 | Command slots | Lock-protected one-shot slot (seq, exactly-once) + jog accumulator (read-and-zero) | `app/pipeline.py` (shared state), `main.py` (`TurretRemoteActions`) | **Mac** + **Pi** | unit-test seq exactly-once + jog coalesce; control loop drains each tick | n/a |
-| 1.15.5 | MANUAL state | Add MANUAL override to SM; suspends auto-aim, consumes jog deltas through same clamps + one-dir approach | `app/statemachine.py`, `app/control.py` | **Mac** (SM) + **Pi** (dry-run) | SM transition tests; on-Pi jog stays within pan 5–47 / tilt 5–25, single mover, no `time.sleep` | force `manual=False` |
-| 1.15.6 | Manual fire | FIRE intent → existing non-blocking pump SM; honors fire-enable + cooldown | `app/control.py`, `actuate/pump.py` (reused) | **Pi** (LED stand-in → pump) | fires only under full predicate + fire-enable; would-fire mode logs only | would-fire/telemetry-only |
-| 1.15.7 | Map + tune | Finalize button map; tune jog step/accel/timeout on-rig | `config.yaml`/`config.local.yaml` | **Pi** | hold-to-slew usable; e-stop unmistakable; digits = presets | revert to tap-only nudge |
-
----
-
-## 6. `RemoteConfig` (drop-in, Python 3.9 — no `match`, no `X | Y`)
-
-```python
-# config.py
-from dataclasses import dataclass, field
-from typing import Dict, Optional
-
-@dataclass
-class RemoteConfig:
-    enabled: bool = False                 # opt-in; SAFE default
-    device_name: str = "gpio_ir_recv"     # match by NAME, not eventN (index drifts)
-    device_path: Optional[str] = None     # optional explicit /dev/input/by-path/...
-    grab: bool = True                     # EVIOCGRAB on headless: stop keystroke leak to tty
-    key_map: Dict[str, str] = field(default_factory=lambda: {
-        "KEY_STOP":       "ESTOP",                # CH-  (0x45) -- unmistakable, one-shot
-        "KEY_CHANNELUP":  "ARM_TOGGLE",           # CH+  (0x47)
-        "KEY_HOMEPAGE":   "HOME",                 # CH   (0x46)
-        "KEY_MODE":       "TOGGLE_FIRE_ENABLE",   # EQ   (0x09)
-        "KEY_PLAYPAUSE":  "FIRE",                 # >||  (0x43)
-        "KEY_PREVIOUS":   "JOG_PAN_NEG",          # |<<  (0x44)
-        "KEY_NEXT":       "JOG_PAN_POS",          # >>|  (0x40)
-        "KEY_VOLUMEUP":   "JOG_TILT_POS",         # +    (0x15)
-        "KEY_VOLUMEDOWN": "JOG_TILT_NEG",         # -    (0x07)
-        "KEY_NUMERIC_0":  "MANUAL_TOGGLE",        # 0    (0x16)
-        "KEY_NUMERIC_1":  "STRATEGY_1",
-        "KEY_NUMERIC_2":  "STRATEGY_2",
-        "KEY_NUMERIC_3":  "STRATEGY_3",
-    })
-    jog_step_deg: float = 2.0             # per key event; see §11 for the math
-    jog_accel_after_repeats: int = 5      # consecutive autorepeats (value==2) before accel
-    jog_accel_max_step_deg: float = 4.0
-    repeat_delay_ms: int = 150            # ir-keytable -D (fast slew onset)
-    repeat_period_ms: int = 110           # ir-keytable -P (near the ~108 ms NEC floor)
-    manual_timeout_s: float = 8.0         # auto-exit MANUAL on inactivity
-    fire_cooldown_s: float = 1.5
-    oneshot_ignore_autorepeat: bool = True  # one-shots act only on value==1
-```
-
----
-
-## 7. `app/remote.py` skeleton (lazy evdev import; `build_key_map` stays pure & Mac-testable)
-
-```python
-# app/remote.py
-import threading, time, select
-
-class RemoteActions:                       # the seam other code implements
-    def arm_toggle(self): raise NotImplementedError
-    def toggle_fire_enable(self): raise NotImplementedError
-    def estop(self): raise NotImplementedError
-    def home(self): raise NotImplementedError
-    def manual_toggle(self): raise NotImplementedError
-    def fire(self): raise NotImplementedError
-    def jog(self, axis, delta_deg): raise NotImplementedError
-    def select_strategy(self, idx): raise NotImplementedError
-
-def build_key_map(cfg):                    # PURE: KEY-name str -> intent str (unit-tested on Mac)
-    return dict(cfg.key_map)
-
-def _find_device(cfg):                     # evdev imported lazily so this module imports on Mac
-    import evdev
-    if cfg.device_path:
-        return evdev.InputDevice(cfg.device_path)
-    for path in evdev.list_devices():
-        dev = evdev.InputDevice(path)
-        if dev.name == cfg.device_name:
-            return dev
-        dev.close()
-    return None
-
-class RemoteListener(threading.Thread):
-    def __init__(self, cfg, actions):
-        super().__init__(daemon=True)
-        self.cfg = cfg; self.actions = actions
-        self.keymap = build_key_map(cfg)
-        self._stop = threading.Event(); self._dev = None
-        self._held = {}                    # keycode -> consecutive value==2 count
-
-    def run(self):
-        from evdev import ecodes
-        while not self._stop.is_set():
-            try:
-                if self._dev is None:
-                    self._dev = _find_device(self.cfg)
-                    if self._dev is None:
-                        time.sleep(1.0); continue
-                    if self.cfg.grab:
-                        try: self._dev.grab()
-                        except Exception: pass
-                r, _, _ = select.select([self._dev.fd], [], [], 0.5)
-                if not r: continue
-                for ev in self._dev.read():
-                    if ev.type == ecodes.EV_KEY:
-                        self._handle(ev, ecodes)
-            except OSError:                # device vanished (replug / eventN renumber)
-                try: self._dev.close()
-                except Exception: pass
-                self._dev = None; time.sleep(0.5)
-            except Exception:
-                time.sleep(0.2)            # best-effort: never propagate
-
-    def _handle(self, ev, ecodes):
-        name = ecodes.KEY.get(ev.code)
-        if isinstance(name, list): name = name[0]
-        intent = self.keymap.get(name)
-        if intent is None: return
-        if ev.value == 0:                  # key up
-            self._held.pop(ev.code, None); return
-        is_fresh = (ev.value == 1)
-        try:
-            if intent.startswith("JOG_"):
-                n = self._held.get(ev.code, 0) + (0 if is_fresh else 1)
-                self._held[ev.code] = n
-                step = self.cfg.jog_step_deg
-                if n >= self.cfg.jog_accel_after_repeats:
-                    step = self.cfg.jog_accel_max_step_deg
-                if   intent == "JOG_PAN_POS":  self.actions.jog("pan",  +step)
-                elif intent == "JOG_PAN_NEG":  self.actions.jog("pan",  -step)
-                elif intent == "JOG_TILT_POS": self.actions.jog("tilt", +step)
-                elif intent == "JOG_TILT_NEG": self.actions.jog("tilt", -step)
-            else:                          # one-shots: ignore autorepeat
-                if self.cfg.oneshot_ignore_autorepeat and not is_fresh: return
-                if   intent == "ESTOP":              self.actions.estop()
-                elif intent == "ARM_TOGGLE":         self.actions.arm_toggle()
-                elif intent == "TOGGLE_FIRE_ENABLE": self.actions.toggle_fire_enable()
-                elif intent == "HOME":               self.actions.home()
-                elif intent == "MANUAL_TOGGLE":      self.actions.manual_toggle()
-                elif intent == "FIRE":               self.actions.fire()
-                elif intent.startswith("STRATEGY_"):
-                    self.actions.select_strategy(int(intent.split("_")[1]))
-        except Exception:
-            pass
-
-    def stop(self):
-        self._stop.set()
-        try:
-            if self._dev and self.cfg.grab: self._dev.ungrab()
-        except Exception: pass
-```
-
----
-
-## 8. `main.py` — `TurretRemoteActions` publishes into shared slots (never moves servos)
-
-```python
-class TurretRemoteActions(RemoteActions):
-    def __init__(self, shared):            # shared = lock-protected slots in app/pipeline.py
-        self.s = shared
-    def _post(self, intent):
-        with self.s.cmd_lock:
-            self.s.cmd_seq += 1
-            self.s.cmd = (self.s.cmd_seq, intent)
-    def arm_toggle(self):         self._post("ARM_TOGGLE")
-    def estop(self):              self._post("ESTOP")
-    def home(self):               self._post("HOME")
-    def toggle_fire_enable(self): self._post("TOGGLE_FIRE_ENABLE")
-    def manual_toggle(self):      self._post("MANUAL_TOGGLE")
-    def fire(self):               self._post("FIRE")
-    def select_strategy(self, i): self._post("STRATEGY_%d" % i)
-    def jog(self, axis, delta):
-        with self.s.jog_lock:
-            if axis == "pan": self.s.jog_pan += delta
-            else:             self.s.jog_tilt += delta
-```
-
----
-
-## 9. Control-thread consumption + MANUAL state (the single servo mover; no blocking)
-
-```python
-def control_tick(self):
-    # (1) drain one-shot command, exactly-once via monotonic seq
-    with self.s.cmd_lock:
-        cmd = self.s.cmd
-    if cmd is not None and cmd[0] != self.last_cmd_seq:
-        self.last_cmd_seq = cmd[0]
-        self.apply_command(cmd[1])        # ESTOP/ARM/HOME/TOGGLE_FIRE_ENABLE/MANUAL/STRATEGY
-
-    # (2) MANUAL: consume jog deltas through the SAME clamps + one-directional approach
-    if self.manual:
-        with self.s.jog_lock:
-            dp, dt = self.s.jog_pan, self.s.jog_tilt
-            self.s.jog_pan = 0.0; self.s.jog_tilt = 0.0
-        if dp or dt:
-            self.last_manual_activity = now()
-            self.pan_target  = clamp(self.pan_target  + dp, 5, 47)
-            self.tilt_target = clamp(self.tilt_target + dt, 5, 25)
-        if now() - self.last_manual_activity > self.cfg.remote.manual_timeout_s:
-            self.manual = False; self.state = "SEARCHING"
-
-    # (3) servo P-step toward target (unchanged; one-directional final approach for backlash)
-    self.step_servos_toward_targets()
-    # (4) non-blocking fire SM (unchanged; honors fire-enable + cooldown)
-    self.service_fire_state_machine()
-```
-
-`apply_command` rules:
-- **ESTOP** (any state, idempotent, best-effort): `armed=False` → pump OFF (de-energize BCM26) → optional HOME → COOLDOWN/SEARCHING. Wrapped so a remote fault can't crash control.
-- **MANUAL_TOGGLE**: flip `self.manual`; on enter, suspend auto-aim and seed `pan_target/tilt_target` from current angles; on exit → SEARCHING.
-- **FIRE**: in MANUAL, set a manual-fire request the fire SM consumes; still gated by fire-enable + (kill-zone bypass allowed in manual) + cooldown. In would-fire mode it only logs.
-- **ARM_TOGGLE / TOGGLE_FIRE_ENABLE / HOME / STRATEGY_n**: flip the corresponding flag / set target / select preset.
-
----
-
-## 10. Button map (this 21-key remote)
-
-| Button | Intent | Why |
+| Button | `KEY_*` | Intent |
 |---|---|---|
-| **CH−** | ESTOP | isolated, findable by feel; one-shot only |
-| CH+ | ARM / DISARM | pairs with e-stop |
-| CH | HOME / center | |
-| EQ | TOGGLE_FIRE_ENABLE (would-fire ↔ live) | distinct, central |
-| **>\|\|** | FIRE | natural trigger |
-| \|<< / >>\| | JOG_PAN − / + | left/right d-pad, comfortable to hold |
-| − / + | JOG_TILT − / + | down/up |
-| 0 | ENTER/EXIT MANUAL | gates jog + manual-fire |
-| 1 / 2 / 3 | STRATEGY presets | digits = presets |
-| 4–9, 100+, 200+ | spare (annotation cycle / absolute-angle jumps) | |
+| **CH−** | KEY_STOP | **ESTOP** (pump off + disarm) |
+| CH+ | KEY_CHANNELUP | ARM / DISARM |
+| CH | KEY_HOMEPAGE | HOME / center |
+| EQ | KEY_MODE | toggle fire-enable (would-fire ↔ live) |
+| **▶∥** | KEY_PLAYPAUSE | **FIRE** |
+| ∣◀◀ / ▶▶∣ | KEY_PREVIOUS / KEY_NEXT | jog pan − / + (disarmed only) |
+| − / + | KEY_VOLUMEDOWN / KEY_VOLUMEUP | jog tilt − / + (disarmed only) |
+| **0** | KEY_NUMERIC_0 | **POWER**: `systemctl start/stop turret.service` |
+| 1–9, 100+, 200+ | (mapped, unused) | spare (future presets) |
 
 ---
 
-## 11. Manual-steering feasibility verdict (quantified)
+## 6. `RemoteConfig` (config.py / config.yaml — as-built)
 
-- **Ceiling:** NEC repeat frames arrive every **~108 ms**; the kernel re-emits held keys at its default **125 ms** period (`Repeat delay 500 / period 125`, settable via `-D/-P` but floored by the IR cadence) → **~8 jog events/s** held. **[VERIFIED]**
-- **Envelope:** pan 42°, tilt 20°. At **2°/step**: full pan ≈ 21 steps ≈ **2.4–2.6 s** held; tilt ≈ 10 steps ≈ **1.1–1.25 s**. At 1°/step, double those (finer aim, rely on taps for final approach).
-- **Servos are not the limit:** MG996R ≈ 0.15–0.19 s/60° (≈315–400°/s); a 1–2° step finishes in <10 ms, far inside the 108 ms IR window. **[VERIFIED]**
-- **Scheme:** **nudge + hold-to-slew** — each fresh press = one step; holding slews at ~8 steps/s; optional acceleration after ~5 held repeats (step 2°→4°) to cross the envelope; `-D 150` so slew starts fast. **This is coarse, not proportional joystick control** — matches the accepted "singular commands are fine" worst case. **[VERIFIED]**
-
----
-
-## 12. Hard-constraint compliance checklist (the agent must satisfy all)
-
-- [ ] **Single servo mover:** `RemoteListener` never touches PCA9685/pump; only publishes intents. Servos move solely in `control_tick`.
-- [ ] **No `time.sleep` in the control loop.** Blocking reads live only in the listener's own thread (`select`/`read_loop`).
-- [ ] **Best-effort remote:** every dispatch + the listener loop is try/excepted; a remote fault never crashes control.
-- [ ] **Clamps preserved:** pan 5–47°, tilt 5–25° applied to manual jog identically.
-- [ ] **Fire stays non-blocking** and honors fire-enable + cooldown, including manual fire.
-- [ ] **Python 3.9 on-device:** no `match`, no `X | Y` unions in `app/remote.py`, `config.py`, control code.
-- [ ] **`build_key_map` is pure** and unit-tested on Mac; evdev import is lazy so the module imports without hardware.
-- [ ] **Module-level run guarded** by `if __name__ == '__main__':` (no v1-style import-time execution).
-- [ ] **v1 untouched;** feature ships `enabled=False` by default.
-- [ ] **EVIOCGRAB** on headless so digits don't leak to a tty.
+Scalar `key_*` string fields (UI-safe — no dict to break the config editor) + supervisor operational
+fields. Py3.9 (no `match`, no `X | Y`). Ships `enabled=False`; the Pi's `config.local.yaml` sets it true.
+Key fields: `enabled`, `gpio_bcm=25`, `device_name="gpio_ir_recv"`, `input_device`, `grab=True`,
+`oneshot_ignore_autorepeat=True`, the ten `key_*` bindings, `forward_host/forward_port=8001/forward_timeout_s`,
+`turret_unit="turret.service"`, `repeat_delay_ms/repeat_period_ms`. Full descriptions in `PARAMETERS.md`.
 
 ---
 
-## 13. Repo bookkeeping to land with the change
+## 7. On-Pi bring-up runbook (what was actually done)
 
-**(a) `IMPLEMENTATION_PLAN.md` — replace the Step 1.15 row:**
-> | 1.15 IR remote (`app/remote.py` + `RemoteConfig`) | **PLANNED → buildable** (pin GATE cleared: BCM17/GPIO17/pin11; stack = gpio-ir+rc-core+evdev; bare VS1838B + RC filter, breakout lost) | OS/keytable + listener + MANUAL state + manual fire on Pi; tune jog on rig. Plan: `claude-docs/plans/moniotoring-and-remote/ir-remote-integration-plan.md` |
+```bash
+# 1. deps the ROOT supervisor needs system-wide (deploy.sh now ensures these):
+sudo apt install -y ir-keytable python3-evdev python3-yaml
 
-Also flip Step 1.15's status note from "SEAM ONLY" and update **§7 Open questions**: the IR receiver pin is resolved (GPIO17/pin11); remaining IR open items are on-Pi (actual scancodes, rc index, measured held cadence, EVIOCGRAB sufficiency, `-D/-P` persistence).
+# 2. overlay + reboot (Bullseye = /boot/config.txt):
+echo 'dtoverlay=gpio-ir,gpio_pin=25' | sudo tee -a /boot/config.txt && sudo reboot
 
-**(b) `docs/DECISIONS.md` — append:**
-> **2026-06-29 — IR remote (Step 1.15).** Stack: `gpio-ir` overlay + rc-core + `ir-keytable` + python-evdev (daemon-free, in-kernel NEC decode, fits the evdev seam; LIRC/pigpio rejected). Receiver: **bare VS1838B on GPIO17 (pin 11)** at 3.3 V — the breakout PCB is lost, so add a replacement RC supply filter (100 Ω series in VCC + 0.1 µF, +4.7–10 µF bulk). Pin order locked (owner) to the standard VS1838B front-view order **SIGNAL–GND–VCC** (legs down); sanity-check only on first power that OUT idles high (reversed VCC/GND kills it). Manual steering capped at ~8 steps/s by the NEC ~108 ms repeat → nudge + hold-to-slew, not proportional. Remote publishes intents into lock-protected slots; control thread stays the single servo mover; new MANUAL state; manual fire honors fire-enable + cooldown. Files: `app/remote.py`, `RemoteConfig` in `config.py`, `TurretRemoteActions` in `main.py`, slots in `app/pipeline.py`, MANUAL in `app/statemachine.py`/`app/control.py`.
+# 3. confirm device (resolve by NAME, index drifts):
+ir-keytable                       # expect: Driver: gpio_ir_recv ... /dev/input/eventN, /dev/lircN
 
-**(c) `claude-docs/PARAMETERS.md` — add the `RemoteConfig` params** (`remote.enabled`, `device_name`, `device_path`, `grab`, `key_map`, `jog_step_deg`, `jog_accel_after_repeats`, `jog_accel_max_step_deg`, `repeat_delay_ms`, `repeat_period_ms`, `manual_timeout_s`, `fire_cooldown_s`, `oneshot_ignore_autorepeat`) with the one-line descriptions from §6, so they appear in the web-UI per-param ⓘ docs.
+# 4. capture/verify scancodes (default keymap is rc6-mce → NEC decodes to nothing until -p nec):
+sudo ir-keytable -s rcN -c -p nec -t
 
-**(d) Wiring map (`IMPLEMENTATION_PLAN.md` §8)** already lists "IR receiver (PROPOSED) — BCM 17". Change PROPOSED → **confirmed**, add the note "bare VS1838B + RC filter; breakout lost".
+# 5. deploy: commit on the Mac, then:
+git push pi main && ssh pi '~/pi-turret/monitoring/deploy.sh'   # installs+enables both units, ensures deps
+#    set remote.enabled: true in ~/pi-turret/config.local.yaml on the Pi, then:
+sudo systemctl restart turret-remote.service
+```
+
+`deploy.sh` installs `turret-remote.service` + `pi-turret-ir.service` + `/etc/rc_keymaps/pi_turret.toml`,
+ensures the apt deps, and `enable --now`s both units. The supervisor runs as **root** (needs `/dev/input`
+**and** `systemctl`); least-privilege alternative noted in the unit file (jayson + a polkit rule).
+
+**Verified on the rig:** POWER `0` → supervisor logs `KEY_NUMERIC_0 → POWER_TOGGLE` → `systemctl start/stop
+turret.service`; the supervisor's `IntentForwarder.dispatch` against the live app flips `fire_enabled`
+(toggle-fire), toggles `state` Disabled↔Enabled (arm), and HOME — proving the key→HTTP→app chain.
 
 ---
 
-## 14. On-Pi gates / open questions (owner)
+## 8. Findings & gotchas (cost real time — don't rediscover)
 
-1. **Actual scancodes + protocol variant** of *this* remote (capture §3.3/§4 — transport-key labels vary per print run). **[UNVERIFIED per-unit]**
-2. ✅ **Bare-device pin order — RESOLVED (owner):** SIGNAL · GND · VCC, front view (lens toward you, legs down) — matches the standard VS1838B datasheet order. Sanity-check only: OUT idles HIGH on first power. **[ASSUMPTION — owner-provided]**
-3. **Which rc index** the receiver lands on; whether a name→`-s rcN` resolver is needed in the unit. **[INFERRED it varies]**
-4. **Measured held cadence** (events/s) → confirms the 2°/step + accel choice. **[VERIFIED ceiling; per-rig TBD]**
-5. **EVIOCGRAB** needed/sufficient to stop console leakage in the headless config. **[INFERRED yes]**
-6. **`-D/-P` persistence** across boot on this kernel (re-apply in the oneshot if not). **[VERIFIED unreliable on some drivers]**
-7. **Receiver placement/range** (5–8 m, ±45°) clear of the aux laser/status LED and direct sun. **[VERIFIED spec; siting TBD]**
+- **Root needs `python3-yaml` + `python3-evdev` SYSTEM-WIDE.** PyYAML was only in jayson's pip `~/.local`,
+  so the root supervisor's `load_config()` silently fell back to defaults (`enabled=False`) and the daemon
+  exited "idle" — `config._load_yaml` swallows `ImportError`. `turret.service` works because it runs as jayson.
+- **`config.yaml` had a STALE `remote:` block** (gpio_bcm 17, old KEY_POWER/KEY_OK names) overriding the new
+  config.py defaults → the intent map would have matched nothing. Keep config.yaml's `remote:` in sync with config.py.
+- **`systemctl stop turret.service` blocks ~5 s** (clean disarm + TimeoutStopSec). The supervisor dispatch is
+  synchronous, so it's briefly unresponsive during a stop — **don't mash POWER** (queued presses each toggle).
+- **Xorg + triggerhappy (thd) also read event0** → without the grab, remote digits leak into X as keystrokes.
+  `grab=True` (EVIOCGRAB) makes the supervisor the exclusive reader; keep it on.
+- **deploy.sh secrets check** must `sudo test -f /etc/alloy/secrets.env` (the dir is root-only; a bare `[ -f ]`
+  runs as the deploy user and false-negatives).
+- **Manual-steering ceiling (unchanged):** NEC repeats ~108 ms → ~8 jog events/s held; nudge + hold-to-slew is
+  coarse, not proportional. Servos (MG996R ~315–400°/s) aren't the limit.
+
+---
+
+## 9. Hard-constraint compliance (satisfied)
+
+- ✅ **Single servo mover** — the supervisor only POSTs intents / runs systemctl; the app's control thread
+  alone moves servos.
+- ✅ **No `time.sleep` in the control loop** — blocking I/O lives in the supervisor process; the app is untouched.
+- ✅ **Best-effort** — every dispatch + the read loop is try/excepted.
+- ✅ **Clamps preserved** — jog forwards to `/api/control-cmd`, which applies pan 5–47 / tilt 5–25.
+- ✅ **Fire stays non-blocking** — FIRE → existing `/api/cmd fire_now`; honors fire-enable + cooldown.
+- ✅ **Python 3.9** — no `match`/unions in the supervisor or config.
+- ✅ **Pure `build_intent_map` + `http_plan`**, Mac unit-tested (`tests/test_remote_supervisor.py`, 28 tests);
+  evdev lazy.
+- ✅ **Run-block guarded** (`remote_daemon.py` / `main()` under `if __name__ == '__main__'`).
+- ✅ **v1 untouched**; ships `remote.enabled=False`.
+- ✅ **EVIOCGRAB** on (stops digit-leak to Xorg/tty).
+
+---
+
+## 10. Deferred / optional follow-ups
+
+- **MANUAL-while-armed jog** — the original §9 in-process MANUAL state (jog while auto-aim is suspended) is
+  **deferred**. Jog currently works only when DISARMED (the existing `/api/control-cmd` guard). Adding it
+  needs in-app changes to `app/control.py` / `app/statemachine.py`, not the supervisor.
+- **Strategy presets** on digits 1/2/3 — keys are mapped but unused (no web endpoint yet).
+- **Reboot test** — both units are `enabled`; a reboot should auto-start them (overlay + keytable + supervisor).
+- **On-rig tuning** — finalize the button map and jog step/accel/`-D`/`-P` to taste.
+- **Dashboard** — re-import `monitoring/dashboards/pi-health.json` into Grafana for the new "Services"
+  liveness row (`turret-remote.service` is already matched by Alloy's `unit_include "(turret.*|alloy)"`).
+
+---
+
+## 11. Files
+
+`app/remote_supervisor.py` (pure `build_intent_map`/`http_plan`, `IntentForwarder`, `RemoteSupervisor` loop) ·
+`remote_daemon.py` (entrypoint) · `config.py` + `config.yaml` (`RemoteConfig`) · `main.py` (in-process listener
+removed) · `monitoring/systemd/{turret-remote,pi-turret-ir}.service` · `monitoring/ir-load-keytable.sh` ·
+`monitoring/rc_keymaps/pi_turret.toml` · `monitoring/deploy.sh` · `monitoring/dashboards/generate_dashboards.py`
++ `pi-health.json` · `tests/test_remote_supervisor.py`. Pins: `README.md` "Wiring & hardware (as-built)" +
+`IMPLEMENTATION_PLAN.md §8`.
