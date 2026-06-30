@@ -98,20 +98,53 @@ sudo systemctl stop turret
 dashboards, and the full ops doc live in **`monitoring/`** (start at `monitoring/README.md`); the
 Grafana Cloud token stays in `/etc/alloy/secrets.env` (never committed).
 
-### Wiring (reused from v1)
-| Function | Bus / pin |
-|---|---|
-| PCA9685 servo driver | I2C **bus 1** @ `0x40` |
-| 1602A LCD (status display) | I2C **bus 1** (`rpi_lcd`) |
-| Pan / Tilt servo | PCA9685 **ch 1 / ch 0** |
-| Water pump (was v1 "main laser") | GPIO **BCM 26** (via relay/MOSFET + flyback diode) |
-| Aux laser / aim marker (opt-in) | GPIO **BCM 24** (rewired from v1's BCM27) |
-| Status LED | GPIO **BCM 23** |
-| IR receiver (PROPOSED, additive) | GPIO **BCM 17** (free pin; confirm before wiring) |
+### Wiring & hardware (as-built)
+| Function | Bus / pin | Notes |
+|---|---|---|
+| PCA9685 servo driver | I2C **bus 1** @ `0x40` | PWM 50 Hz; init once |
+| 1602A LCD (status display) | I2C **bus 1** @ `~0x27` | shares the bus (`rpi_lcd`) |
+| Pan / Tilt servo (MG996R) | PCA9685 **ch 1 / ch 0** | separate 5–6 V supply |
+| Water pump (was v1 "main laser") | GPIO **BCM 26** (pin 37) | via relay/MOSFET **+ flyback diode** |
+| Aux laser / aim marker (opt-in) | GPIO **BCM 24** (pin 18) | rewired from v1's BCM27; default off |
+| Status LED | GPIO **BCM 23** (pin 16) | on while not SAFE |
+| IR receiver (VS1838B) — **WIRED** | GPIO **BCM 25** (pin 22) | `dtoverlay=gpio-ir,gpio_pin=25`; + RC supply filter |
+| Pi Camera (detection) | CSI port | frames for detection, **not** streamed |
+| USB webcam (stream) | USB 2 — `/dev/video0` | mjpg-streamer live stream (:8080) |
+| Coral USB Accelerator | USB 3 | Edge-TPU YOLOv8n inference |
+
+```
+RASPBERRY PI 4  (Debian 11 Bullseye · Python 3.9 · Coral USB Edge-TPU)
+│
+├─ CSI port ............... Pi Camera             → detection frames (not streamed)
+├─ USB 2 ................. USB webcam /dev/video0 → mjpg-streamer live stream (:8080)
+├─ USB 3 ................. Coral USB Accelerator  → Edge-TPU YOLOv8n inference
+│
+├─ I2C bus 1   (SDA1 pin 3 / BCM2 · SCL1 pin 5 / BCM3 · 3V3 logic)
+│    ├─ PCA9685 @ 0x40  (PWM 50 Hz) ─┬─ ch1 → Pan  servo (MG996R)
+│    │                               └─ ch0 → Tilt servo (MG996R)
+│    └─ 1602A LCD @ ~0x27            → status: state · target · aim err · fps · shots
+│
+├─ GPIO BCM23  (pin 16) → Status LED                 (on while not SAFE)
+├─ GPIO BCM24  (pin 18) → Aux laser / aim marker     (opt-in; default off — laser safety)
+├─ GPIO BCM26  (pin 37) → relay/MOSFET → Water pump  [flyback diode across the load]
+├─ GPIO BCM25  (pin 22) ← IR receiver VS1838B OUT    (dtoverlay=gpio-ir, NEC; SIGNAL·GND·VCC)
+└─ 3V3 (pin 1) ─[100 Ω]→ VS1838B VCC                 (+ 0.1 µF & 4.7–10 µF to GND = RC filter)
+
+POWER & GROUND
+  Pi ................. its own 5 V USB-C PSU
+  Servos + PCA9685 V+  SEPARATE 5–6 V supply   (NEVER the Pi 5 V rail)
+  Pump .............. its own supply, switched by the relay/MOSFET (BCM26)
+  Ground ............ all supplies share a COMMON GND with the Pi
+```
 
 The **LCD** shows live lifecycle info (boot + IP, state, selected target, aim error, kill-zone, fps,
-shot count). An **IR remote** (start/stop + basic control) is under consideration — additive on a free
-pin via `dtoverlay=gpio-ir`; see `IMPLEMENTATION_PLAN.md` step 1.15.
+shot count). The **IR remote** (21-key NEC) is handled by a separate always-on supervisor daemon
+(`turret-remote.service` → `app/remote_supervisor.py`): the **POWER** key runs `systemctl start/stop
+turret.service`, every other key is forwarded to the running app's web API on :8001. It owns the
+receiver (`EVIOCGRAB`) and never drives the servos/pump directly. See `IMPLEMENTATION_PLAN.md` step 1.15.
+
+> Hardware is **fixed** — reuse these pins; new hardware is additive on free pins only and must be
+> confirmed before wiring. Full pin map + free-pin list: `IMPLEMENTATION_PLAN.md §8`.
 
 
 
