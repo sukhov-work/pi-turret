@@ -128,16 +128,31 @@ app:
   status_led_enabled: true        # BCM23
   aux_marker_enabled: false       # BCM24 aux laser as aim marker — OPT-IN (laser safety)
 
-# IR remote — PROPOSED additive hardware (no v1 GPIO inputs). Confirm gpio_bcm and
-# add `dtoverlay=gpio-ir,gpio_pin=17` to /boot/config.txt before wiring. See plan 1.15.
+# IR remote — Step 1.15. Bare VS1838B on BCM25 (`dtoverlay=gpio-ir,gpio_pin=25`).
+# The SUPERVISOR daemon (turret-remote.service) owns the device and either runs
+# systemctl on the turret unit (POWER key) or forwards the key to the app's :8001 API.
+# Ships off — set `remote.enabled: true` in config.local.yaml to activate on the Pi.
+# KEY_* names must match /etc/rc_keymaps/pi_turret.toml (verified on this remote).
 remote:
   enabled: false
-  gpio_bcm: 17                    # PROPOSED free pin (BCM 2/3 I2C, 23/26/27 in use)
-  input_device: ""               # /dev/input/eventN from ir-keytable
-  key_toggle_arm: KEY_POWER
-  key_enable_fire: KEY_OK
-  key_center: KEY_HOME
-  key_pan_left: KEY_LEFT
-  key_pan_right: KEY_RIGHT
-  key_tilt_up: KEY_UP
-  key_tilt_down: KEY_DOWN
+  gpio_bcm: 25                    # owner-wired signal pin (dtoverlay gpio_pin=25)
+  device_name: gpio_ir_recv       # match evdev device by NAME (eventN index drifts)
+  input_device: ""               # optional explicit /dev/input/by-path/... (overrides name)
+  grab: true                     # EVIOCGRAB so digits don't leak to a tty (headless)
+  oneshot_ignore_autorepeat: true
+  key_estop: KEY_STOP            # CH-  -> ESTOP
+  key_toggle_arm: KEY_CHANNELUP  # CH+  -> arm/disarm
+  key_enable_fire: KEY_MODE      # EQ   -> toggle fire-enable
+  key_center: KEY_HOMEPAGE       # CH   -> HOME
+  key_fire: KEY_PLAYPAUSE        # >||  -> FIRE
+  key_power: KEY_NUMERIC_0       # 0    -> POWER: systemctl start/stop turret.service
+  key_pan_left: KEY_PREVIOUS     # |<<  -> jog pan -
+  key_pan_right: KEY_NEXT        # >>|  -> jog pan +
+  key_tilt_up: KEY_VOLUMEUP      # +    -> jog tilt up
+  key_tilt_down: KEY_VOLUMEDOWN  # -    -> jog tilt down
+  forward_host: "127.0.0.1"
+  forward_port: 8001
+  forward_timeout_s: 1.0
+  turret_unit: turret.service
+  repeat_delay_ms: 150
+  repeat_period_ms: 110
