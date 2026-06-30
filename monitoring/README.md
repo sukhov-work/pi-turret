@@ -48,6 +48,8 @@ The turret app runs as a **manual-start systemd service** so its liveness is mon
 `turret.service` = installed, **disabled, stopped** (start it yourself, or via the IR power key; see §5).
 `turret-remote.service` = IR supervisor that owns the receiver and `systemctl start/stop`s turret.service for the
 power key (forwards other keys to the app's :8001 API); **enabled on boot**, self-exits when `remote.enabled=False`.
+Runs as **root**, so it needs `python3-yaml`+`python3-evdev`+`ir-keytable` installed **system-wide** (deploy.sh
+ensures them) — pip-in-`~jayson/.local` is invisible to root and the daemon would silently see `enabled=False`.
 
 ## 3. Grafana Cloud connection (stack `mellowmushroom1792`, org 1804779, region prod-us-west-0)
 

@@ -259,7 +259,7 @@ box has untracked files in the path being checked out (e.g. fixtures the generat
 | 1.12 USB-webcam streamer | **DONE + Pi-VERIFIED 2026-06-29** | `/dev/video0`=UVC cam; streamer launches → HTTP 200 MJPEG → stops; binary = v1's committed ARM `_build/mjpg_streamer` |
 | 1.13 LCD lifecycle display (`actuate/lcd.py`, `app/display.py`) | **DONE (Mac logic)** | verify on real LCD (Pi) |
 | 1.14 status LED + aux marker (`actuate/indicators.py`) | **DONE (Mac)** | verify BCM23 (status) / BCM24 (aux, rewired) on Pi |
-| 1.15 IR remote — **SUPERVISOR** (`remote_daemon.py` + `app/remote_supervisor.py` + `turret-remote.service`) | **BUILT on Mac (2026-06-30), on-Pi bring-up pending** — pin BCM25/GPIO25/pin22; gpio-ir+rc-core+evdev; daemon does `systemctl start/stop turret.service` (POWER) + forwards keys to :8001 | Pi: overlay+reboot, `apt install ir-keytable python3-evdev`, capture scancodes, enable units, set `remote.enabled:true`, verify |
+| 1.15 IR remote — **SUPERVISOR** (`remote_daemon.py` + `app/remote_supervisor.py` + `turret-remote.service`) | ✅ **BUILT + VERIFIED on-Pi (2026-06-30)** — pin BCM25/GPIO25/pin22; gpio-ir+rc-core+evdev; daemon does `systemctl start/stop turret.service` (POWER `0`) + forwards keys to :8001. POWER + forwards confirmed on the rig. | Optional: reboot test (units enabled → auto-start); finalize button map / jog tuning on rig |
 | 1.16 Monitoring (Alloy → Grafana Cloud) + `turret.service` | **DONE + Cloud-VERIFIED 2026-06-29** | Alloy v1.17 ships node/log/turret metrics; manual-start `turret.service`. Ops: `monitoring/README.md` |
 
 **Open flags:** (a) ✅ RESOLVED 2026-06-29 — `decode_v8.coords_normalized` is **pinned `True`** by the
@@ -330,8 +330,15 @@ detail but its *in-process* listener design is superseded by the supervisor (see
   `config.py`, units `monitoring/systemd/{turret-remote,pi-turret-ir}.service` + `monitoring/ir-load-keytable.sh`
   + `monitoring/rc_keymaps/pi_turret.toml`, dashboard Services row, `deploy.sh`. Tests:
   `tests/test_remote_supervisor.py` (28). Ships `remote.enabled=False`.
-- **On-Pi bring-up (pending):** overlay + reboot; `apt install ir-keytable python3-evdev`; capture this remote's
-  real NEC scancodes; load keytable; set `remote.enabled: true`; verify POWER start/stop + forwards + Alloy liveness.
+- **On-Pi bring-up (DONE 2026-06-30):** overlay added + rebooted (`ir-receiver@19`=GPIO25, rc0=`gpio_ir_recv`);
+  `apt install ir-keytable python3-evdev` **and `python3-yaml`** (the root supervisor needs yaml system-wide —
+  it was only in jayson's pip, so the daemon silently fell back to `enabled=False`); scancodes captured (match the
+  table); keytable loaded; `remote.enabled: true` in the overlay. **Verified:** POWER `0` → `systemctl start/stop
+  turret.service`; forwards (toggle-fire, arm, home) hit :8001; `turret-remote.service` active/enabled.
+- **Gotchas (see `mem:decisions/ir_remote`):** root supervisor needs `python3-yaml`+`python3-evdev` system-wide;
+  `systemctl stop` blocks ~5 s (don't mash POWER); Xorg+triggerhappy also read event0 so `grab=True` is required;
+  deploy.sh secrets check must `sudo test` (`/etc/alloy` is root-only). **Owner must re-import `pi-health.json`** to
+  see the new Services liveness row (dashboards are import-only with the current token).
 - **Validation:** `build_intent_map`/`http_plan`/dispatch unit-tested on Mac; on-Pi a key-down dispatches its
   intent without the daemon ever touching servos/pump; fire stays non-blocking + honors fire-enable/cooldown;
   remote faults are best-effort (never crash control).

@@ -34,6 +34,12 @@ sudo systemctl daemon-reload
 sudo systemctl reload-or-restart alloy
 
 echo "==> IR remote: keytable loader + supervisor"
+# Deps the root-run supervisor + keytable need (system-wide so root can import them):
+#   ir-keytable = NEC keytable loader; python3-evdev = read /dev/input; python3-yaml = read config*.yaml.
+# (turret.service runs as jayson and may use jayson's pip yaml, but turret-remote runs as ROOT.)
+for pkg in ir-keytable python3-evdev python3-yaml; do
+  dpkg -s "$pkg" >/dev/null 2>&1 || { echo "   installing $pkg"; sudo apt-get install -y "$pkg"; }
+done
 # Keytable oneshot: enable for boot; try now but tolerate a missing device (the
 # dtoverlay=gpio-ir,gpio_pin=25 line + reboot may not be in place on first deploy).
 sudo systemctl enable pi-turret-ir.service >/dev/null 2>&1 || true
@@ -44,7 +50,8 @@ sudo systemctl restart pi-turret-ir.service 2>/dev/null \
 sudo systemctl enable turret-remote.service >/dev/null 2>&1 || true
 sudo systemctl restart turret-remote.service 2>/dev/null || true
 
+te=$(systemctl is-enabled turret 2>/dev/null || true)
 echo "==> done. Alloy: $(systemctl is-active alloy) / $(systemctl is-enabled alloy)"
-echo "    turret.service:        $(systemctl is-enabled turret 2>/dev/null || echo not-installed) (start manually or via IR power key)"
+echo "    turret.service:        ${te:-not-installed} (start manually or via IR power key)"
 echo "    turret-remote.service: $(systemctl is-active turret-remote 2>/dev/null) / $(systemctl is-enabled turret-remote 2>/dev/null)"
 echo "    pi-turret-ir.service:  $(systemctl is-active pi-turret-ir 2>/dev/null) / $(systemctl is-enabled pi-turret-ir 2>/dev/null)"
