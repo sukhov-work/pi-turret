@@ -40,6 +40,12 @@ echo "==> IR remote: keytable loader + supervisor"
 for pkg in ir-keytable python3-evdev python3-yaml; do
   dpkg -s "$pkg" >/dev/null 2>&1 || { echo "   installing $pkg"; sudo apt-get install -y "$pkg"; }
 done
+# The supervisor (root) drives the shared 1602 LCD with a STANDBY screen; rpi_lcd is pip-only.
+# Best-effort: StatusLcd degrades to "no display" if this import is missing (no crash).
+sudo python3 -c "import rpi_lcd" 2>/dev/null \
+  || { echo "   installing rpi_lcd (pip, system-wide for root)"; \
+       sudo pip3 install rpi_lcd 2>/dev/null \
+         || echo "   !! rpi_lcd install failed — supervisor runs without the standby LCD"; }
 # Keytable oneshot: enable for boot; try now but tolerate a missing device (the
 # dtoverlay=gpio-ir,gpio_pin=25 line + reboot may not be in place on first deploy).
 sudo systemctl enable pi-turret-ir.service >/dev/null 2>&1 || true

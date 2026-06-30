@@ -16,3 +16,4 @@ last_servo_state.txt
 
 # monitoring: Grafana Cloud token/endpoints live only on the Pi, never in git
 /monitoring/secrets.env
+/.venv/

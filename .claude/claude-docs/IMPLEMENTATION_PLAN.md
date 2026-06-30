@@ -316,10 +316,14 @@ detail but its *in-process* listener design is superseded by the supervisor (see
   from the owner's 21-key NEC remote. Additive (v1 has no GPIO inputs).
 - **Architecture — RESOLVED (supervisor):** an always-on daemon **`turret-remote.service`** (root) runs
   `remote_daemon.py` → `app/remote_supervisor.py`. It owns the IR evdev device (EVIOCGRAB), and:
-  POWER key (**`0`**) → `systemctl start/stop turret.service`; every other key → HTTP POST to the running app's
-  web API on :8001 (`/api/cmd`, `/api/control-cmd` — the routes the web UI already uses). The daemon never
-  touches servos/pump. Jog forwards to `/api/control-cmd` (works **when disarmed**; MANUAL-while-armed is
-  deferred — it would need in-app control/state changes). The in-process `app/remote.py` listener is a dormant seam.
+  POWER key (**`0`**) → `systemctl start/stop turret.service`; SHUTDOWN key (**`9`**) → `systemctl poweroff` the
+  whole Pi, **gated to fire only while turret.service is stopped** (a stray press can't cut power mid-engagement);
+  every other key → HTTP POST to the running app's web API on :8001 (`/api/cmd`, `/api/control-cmd` — the routes
+  the web UI already uses). The daemon never touches servos/pump. Jog forwards to `/api/control-cmd` (works **when
+  disarmed**; MANUAL-while-armed is deferred — it would need in-app control/state changes). The supervisor also
+  owns the shared **1602 LCD** while the turret is OFF (`SupervisorLcd` → a STANDBY screen); the turret app
+  reclaims the LCD whenever it runs, so only one process writes the I2C bus at a time. The in-process
+  `app/remote.py` listener is a dormant seam.
 - **Stack — LOCKED:** kernel `gpio-ir` overlay + rc-core + `ir-keytable` + python-evdev (daemon-free in-kernel
   NEC decode). Remote appears as `/dev/input/eventN` (resolve by driver name `gpio_ir_recv`, index drifts).
 - **Hardware — WIRED:** bare **VS1838B on BCM25 / GPIO25 / pin 22** @ 3.3 V (`dtoverlay=gpio-ir,gpio_pin=25`).

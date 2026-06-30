@@ -166,6 +166,7 @@
         <button onclick="cmd('marker_on')">Marker&nbsp;On</button>
         <button onclick="cmd('marker_off')">Marker&nbsp;Off</button>
       </div>
+      <button style="margin-top:7px;width:100%" onclick="snapshot()">Save&nbsp;Snapshot</button>
     </div>
 
     <div class="card">
@@ -406,6 +407,7 @@ async function post(path, body, isJson){
 async function cmd(c){ const d=await post("/api/cmd",c,false); log(d.error||("CMD "+c.toUpperCase()), d.ok); pollNow(); }
 async function jog(c){ const d=await post("/api/control-cmd",c,false); log(d.error||("SLEW "+c.toUpperCase()+(d.angle_deg!=null?" -> "+d.angle_deg+"°":"")), d.ok); }
 async function streamCmd(c){ const d=await post("/api/cmd",c,false); log(d.error||("FEED "+c.toUpperCase()), d.ok); pollNow(); }
+async function snapshot(){ const d=await post("/api/cmd","save_snapshot",false); log(d.error||("SNAPSHOT -> "+(d.path||"saved")), d.ok); }
 
 // --- detection-cam debug video (raw lores JPEG under the canvas overlay) ---
 async function toggleVideo(){

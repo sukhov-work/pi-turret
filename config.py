@@ -201,6 +201,7 @@ class RemoteConfig:
     key_center: str = "KEY_HOMEPAGE"         # CH   -> HOME / center
     key_fire: str = "KEY_PLAYPAUSE"          # >||  -> manual FIRE
     key_power: str = "KEY_NUMERIC_0"         # 0    -> POWER toggle: systemctl start/stop turret.service
+    key_shutdown: str = "KEY_NUMERIC_9"      # 9    -> halt the whole Pi (ONLY when turret.service is stopped)
     key_pan_left: str = "KEY_PREVIOUS"       # |<<  -> jog pan -
     key_pan_right: str = "KEY_NEXT"          # >>|  -> jog pan +
     key_tilt_up: str = "KEY_VOLUMEUP"        # +    -> jog tilt up
@@ -209,7 +210,10 @@ class RemoteConfig:
     forward_host: str = "127.0.0.1"          # the running app's web API host
     forward_port: int = 8001                 # app.web_port — where intents are POSTed
     forward_timeout_s: float = 1.0           # per-request HTTP timeout (best-effort)
-    turret_unit: str = "turret.service"      # systemd unit the POWER key starts/stops
+    turret_unit: str = "turret.service"      # systemd unit the POWER/SHUTDOWN keys act on/gate against
+    # --- supervisor standby LCD (the shared 1602; the turret app owns it while it runs) ---
+    lcd_status_enabled: bool = True          # show a STANDBY screen while turret.service is DOWN
+    lcd_poll_s: float = 2.0                  # re-check unit state / refresh the standby screen this often
     repeat_delay_ms: int = 150               # ir-keytable -D (fast slew onset for hold-to-jog)
     repeat_period_ms: int = 110              # ir-keytable -P (near the ~108 ms NEC repeat floor)
 

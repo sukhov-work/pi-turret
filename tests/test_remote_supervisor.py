@@ -9,7 +9,9 @@ from config import RemoteConfig
 from app.remote_supervisor import (
     IntentForwarder,
     RemoteSupervisor,
+    SupervisorLcd,
     build_intent_map,
+    format_standby_lines,
     http_plan,
 )
 
@@ -24,6 +26,7 @@ def test_intent_map_default_bindings():
     assert m["KEY_HOMEPAGE"] == "HOME"
     assert m["KEY_PLAYPAUSE"] == "FIRE"
     assert m["KEY_NUMERIC_0"] == "POWER_TOGGLE"
+    assert m["KEY_NUMERIC_9"] == "SHUTDOWN"
     assert m["KEY_PREVIOUS"] == "JOG_PAN_NEG"
     assert m["KEY_NEXT"] == "JOG_PAN_POS"
     assert m["KEY_VOLUMEUP"] == "JOG_TILT_POS"
@@ -57,8 +60,8 @@ def test_http_plan_jog_directions():
 
 
 def test_http_plan_imperative_intents_have_no_static_plan():
-    # ARM_TOGGLE / POWER_* need a live state read -> handled in dispatch(), not here.
-    for intent in ("ARM_TOGGLE", "POWER_TOGGLE", "POWER_ON", "POWER_OFF", "NOPE"):
+    # ARM_TOGGLE / POWER_* / SHUTDOWN need a live state read -> handled in dispatch(), not here.
+    for intent in ("ARM_TOGGLE", "POWER_TOGGLE", "POWER_ON", "POWER_OFF", "SHUTDOWN", "NOPE"):
         assert http_plan(intent) == []
 
 
@@ -67,10 +70,11 @@ def test_http_plan_imperative_intents_have_no_static_plan():
 class _RecordingForwarder(IntentForwarder):
     """Captures POST / systemctl side effects instead of performing them."""
 
-    def __init__(self, cfg, state="Disabled", active=False):
-        super().__init__(cfg)
+    def __init__(self, cfg, state="Disabled", active=False, notify=None):
+        super().__init__(cfg, notify=notify)
         self.posts = []
         self.systemctl_calls = []
+        self.poweroffs = []
         self._state = state
         self._active = active
 
@@ -79,6 +83,9 @@ class _RecordingForwarder(IntentForwarder):
 
     def _systemctl(self, action):
         self.systemctl_calls.append(action)
+
+    def _poweroff(self):
+        self.poweroffs.append(True)
 
     def _turret_state(self):
         return self._state
@@ -124,6 +131,25 @@ def test_dispatch_power_explicit():
     fwd.dispatch("POWER_ON")
     fwd.dispatch("POWER_OFF")
     assert fwd.systemctl_calls == ["start", "stop"]
+
+
+def test_dispatch_shutdown_powers_off_only_when_turret_stopped():
+    stopped = _RecordingForwarder(RemoteConfig(), active=False)
+    stopped.dispatch("SHUTDOWN")
+    assert stopped.poweroffs == [True]
+
+    running = _RecordingForwarder(RemoteConfig(), active=True)
+    running.dispatch("SHUTDOWN")
+    assert running.poweroffs == []                # gated: power the turret off first
+
+
+def test_dispatch_shutdown_flashes_lcd_before_poweroff():
+    msgs = []
+    fwd = _RecordingForwarder(RemoteConfig(), active=False,
+                              notify=lambda l1, l2: msgs.append((l1, l2)))
+    fwd.dispatch("SHUTDOWN")
+    assert msgs and "SHUT" in msgs[0][0].upper()  # operator sees the confirmation first
+    assert fwd.poweroffs == [True]
 
 
 def test_base_url_from_config():
@@ -182,6 +208,56 @@ def test_handle_jog_repeats_on_hold():
 
 def test_handle_unmapped_key_is_ignored():
     sup, fwd = _supervisor()
-    ecodes = _FakeEcodes({99: "KEY_NUMERIC_9"})  # not in the default map
+    ecodes = _FakeEcodes({99: "KEY_NUMERIC_8"})  # spare digit, not in the default map
     sup._handle(_FakeEvent(99, 1), ecodes)
     assert fwd.dispatched == []
+
+
+def test_handle_shutdown_key_is_a_oneshot():
+    sup, fwd = _supervisor()
+    ecodes = _FakeEcodes({88: "KEY_NUMERIC_9"})  # 9 -> SHUTDOWN (fires on keydown only)
+    sup._handle(_FakeEvent(88, 1), ecodes)       # down
+    sup._handle(_FakeEvent(88, 2), ecodes)       # autorepeat (ignored — no double poweroff)
+    assert fwd.dispatched == ["SHUTDOWN"]
+
+
+# --- standby LCD (supervisor owns the 1602 while the turret is OFF) ----------
+
+class _FakeLcd:
+    def __init__(self):
+        self.shows = []
+
+    def show(self, line1="", line2=""):
+        self.shows.append((line1, line2))
+
+
+def test_format_standby_lines_fits_and_advertises_actions():
+    l1, l2 = format_standby_lines(0)
+    assert len(l1) <= 16 and len(l2) <= 16
+    assert "0" in l2 and "9" in l2               # 0 = power on, 9 = halt
+
+
+def test_format_standby_lines_heartbeat_advances():
+    assert format_standby_lines(0)[0] != format_standby_lines(1)[0]
+
+
+def test_supervisor_lcd_shows_standby_when_turret_down():
+    lcd = _FakeLcd()
+    sl = SupervisorLcd(lcd, active_getter=lambda: False)
+    sl.render_once()
+    assert lcd.shows == [format_standby_lines(0)]
+
+
+def test_supervisor_lcd_silent_when_turret_up():
+    lcd = _FakeLcd()
+    sl = SupervisorLcd(lcd, active_getter=lambda: True)
+    sl.render_once()
+    assert lcd.shows == []                        # the app owns the LCD; stay off the bus
+
+
+def test_supervisor_lcd_flash_freezes_updates():
+    lcd = _FakeLcd()
+    sl = SupervisorLcd(lcd, active_getter=lambda: False)
+    sl.flash("SHUTTING DOWN", "remote poweroff")
+    sl.render_once()                              # held after a flash -> no further writes
+    assert lcd.shows == [("SHUTTING DOWN", "remote poweroff")]

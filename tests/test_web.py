@@ -360,6 +360,46 @@ def test_telemetry_exposes_detection_video_flag(rig):
     assert web.telemetry()["detection_video"]["enabled"] is False
 
 
+# ---- manual snapshot ----
+
+def test_save_snapshot_without_frame_errors(rig):
+    cfg, servo, control, pipeline, web = rig
+    assert pipeline.latest_frame.get() is None
+    res = web.command("save_snapshot")
+    assert res["ok"] is False and "frame" in res["error"]
+
+
+def test_save_snapshot_writes_current_frame_to_configured_dir(rig, monkeypatch):
+    import numpy as np
+
+    import app.snapshots as snaps
+    cfg, servo, control, pipeline, web = rig
+    cfg.app.snapshot_dir = "/tmp/turret-snaps"
+    pipeline.latest_frame.put(np.zeros((256, 256), np.uint8))
+    seen = {}
+    def _fake_save(out_dir, frame, **kw):
+        seen["dir"], seen["shape"] = out_dir, frame.shape
+        return out_dir + "/snap_x.jpg"
+    monkeypatch.setattr(snaps, "save_frame", _fake_save)
+    res = web.command("snapshot")                  # alias for save_snapshot
+    assert res["ok"] is True
+    assert seen["dir"] == "/tmp/turret-snaps" and seen["shape"] == (256, 256)
+    assert res["path"].endswith("snap_x.jpg")
+
+
+def test_save_snapshot_reports_write_failure(rig, monkeypatch):
+    import numpy as np
+
+    import app.snapshots as snaps
+    cfg, servo, control, pipeline, web = rig
+    pipeline.latest_frame.put(np.zeros((8, 8), np.uint8))
+    def _boom(*a, **k):
+        raise OSError("disk full")
+    monkeypatch.setattr(snaps, "save_frame", _boom)
+    res = web.command("save_snapshot")
+    assert res["ok"] is False and "disk full" in res["error"]
+
+
 # ---- calibration + persistence (Phase C) ----
 
 def test_set_home_records_current_pose(rig):

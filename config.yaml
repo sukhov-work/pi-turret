@@ -146,6 +146,7 @@ remote:
   key_center: KEY_HOMEPAGE       # CH   -> HOME
   key_fire: KEY_PLAYPAUSE        # >||  -> FIRE
   key_power: KEY_NUMERIC_0       # 0    -> POWER: systemctl start/stop turret.service
+  key_shutdown: KEY_NUMERIC_9    # 9    -> halt the whole Pi (ONLY when turret.service is stopped)
   key_pan_left: KEY_PREVIOUS     # |<<  -> jog pan -
   key_pan_right: KEY_NEXT        # >>|  -> jog pan +
   key_tilt_up: KEY_VOLUMEUP      # +    -> jog tilt up
@@ -154,5 +155,7 @@ remote:
   forward_port: 8001
   forward_timeout_s: 1.0
   turret_unit: turret.service
+  lcd_status_enabled: true       # supervisor shows a STANDBY screen on the 1602 while the turret is OFF
+  lcd_poll_s: 2.0                # re-check turret state / refresh the standby screen this often
   repeat_delay_ms: 150
   repeat_period_ms: 110

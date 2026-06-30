@@ -15,6 +15,24 @@ can `systemctl start turret.service` while the app is STOPPED. Related: `mem:arc
 - The in-process `app/remote.py` listener is **dormant** — `main.py` no longer starts it (removed `RemoteListener`
   wiring + `TurretRemoteActions`), so `remote.enabled=true` activates only the supervisor.
 
+## Added 2026-07-01 — standby LCD + remote Pi-shutdown (Mac-tested; on-Pi UNVERIFIED)
+- **SHUTDOWN = digit `9`** (`KEY_NUMERIC_9`, scancode 0x4a; was a spare). `key_shutdown` → `SHUTDOWN` intent →
+  `IntentForwarder._shutdown_pi()` runs `systemctl poweroff` **only when `_unit_active()` is False** (refused while
+  turret runs; oneshot so autorepeat can't double-fire). Footgun: one press in standby halts the Pi (physical
+  power-cycle to return) — gate is "turret off"; offer hold-to-confirm if owner wants.
+- **Supervisor owns the shared 1602 LCD while the turret is OFF.** `SupervisorLcd` (low-rate thread) shows a STANDBY
+  screen (`format_standby_lines`: "SUPERVISOR <spin>" / "0:PWR-ON 9:HALT") **only when `turret.service` is inactive**;
+  polls `forwarder.unit_active()` every `remote.lcd_poll_s` (2.0s), writes on frame-change → one self-healing
+  hand-off frame at most. The turret app's `LcdReporter` reclaims the LCD whenever it runs (is-active flips to
+  "active" as soon as the unit execs, *before* the app inits its LCD → contention window is tiny). Gated on
+  `app.lcd_enabled && remote.lcd_status_enabled`. `flash()` freezes the screen for the shutdown confirm.
+- **NEW GOTCHA:** `rpi_lcd` is **pip-only** and the supervisor runs as **ROOT** → it must be installed system-wide
+  (`sudo pip3 install rpi_lcd`, now in deploy.sh, best-effort). Same class as the python3-yaml/-evdev need.
+  `StatusLcd` degrades to no-display if it's missing (no crash, no standby screen).
+- New `RemoteConfig` fields: `key_shutdown`, `lcd_status_enabled`, `lcd_poll_s` (config.py + config.yaml). Tests: 245.
+- **On-Pi TODO:** verify root can drive the LCD + `systemctl poweroff`; the standby/hand-off render; "SHUTTING DOWN"
+  lands before power cuts. Re-run `monitoring/deploy.sh` (installs rpi_lcd) after `git push pi main`.
+
 ## Hardware (Pi-verified)
 - **Pin = BCM25 / GPIO25 / physical pin 22** (owner-wired; supersedes the old BCM17 proposal).
   `dtoverlay=gpio-ir,gpio_pin=25` in **`/boot/config.txt`** (Bullseye, NOT /boot/firmware). dmesg: `ir-receiver@19`

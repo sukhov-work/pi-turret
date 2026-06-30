@@ -34,4 +34,4 @@ variant = "nec"
 0x5a = "KEY_NUMERIC_6"     # 6    (spare)
 0x42 = "KEY_NUMERIC_7"     # 7    (spare)
 0x52 = "KEY_NUMERIC_8"     # 8    (spare)
-0x4a = "KEY_NUMERIC_9"     # 9    (spare)
+0x4a = "KEY_NUMERIC_9"     # 9    -> SHUTDOWN: systemctl poweroff (ONLY when turret.service is stopped)

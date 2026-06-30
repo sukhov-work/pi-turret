@@ -172,6 +172,25 @@ class TurretWebController:
 
     # ---- write ----
 
+    def save_snapshot(self) -> Dict[str, Any]:
+        """Manually save the current detection frame to ``cfg.app.snapshot_dir``.
+
+        The frame is the greyscale model-input view the detector sees
+        (``pipeline.latest_frame``). Runs on the web thread so it never stalls
+        control; the write is non-critical — any error is reported, not raised.
+        """
+        frame = self.pipeline.latest_frame.get()
+        if frame is None:
+            return {"ok": False, "error": "no frame available yet"}
+        from app.snapshots import save_frame
+        try:
+            path = save_frame(self.cfg.app.snapshot_dir, frame)
+        except Exception as exc:  # noqa: BLE001 — snapshot I/O is non-critical
+            logger.warning("snapshot save failed", exc_info=True)
+            return {"ok": False, "error": str(exc)}
+        logger.info("snapshot saved: %s", path)
+        return {"ok": True, "command": "save_snapshot", "path": path}
+
     def command(self, code: Optional[str]) -> Dict[str, Any]:
         code = (code or "").strip()
         if code in ("arm", "enable_turret"):
@@ -207,6 +226,8 @@ class TurretWebController:
             self.cfg.app.detection_video_enabled = (code == "detect_video_on")
             return {"ok": True, "command": code,
                     "detection_video": self.cfg.app.detection_video_enabled}
+        elif code in ("save_snapshot", "snapshot"):
+            return self.save_snapshot()
         elif code == "stream_usb":
             if self.streamer is None:
                 return {"ok": False, "error": "no streamer configured"}

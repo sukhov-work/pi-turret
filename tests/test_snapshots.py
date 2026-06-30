@@ -1,7 +1,17 @@
 """Snapshot metadata assembly (pure)."""
 from conftest import make_track
 
-from app.snapshots import build_metadata
+from app.snapshots import build_metadata, snapshot_filename
+
+
+def test_snapshot_filename_is_timestamped_jpg():
+    name = snapshot_filename(timestamp=1_700_000_000.123)
+    assert name.startswith("snap_") and name.endswith(".jpg")
+    assert "_123.jpg" in name                      # sub-second millis preserved
+
+
+def test_snapshot_filename_distinct_per_millisecond():
+    assert snapshot_filename(1.0) != snapshot_filename(2.5)
 
 
 def test_build_metadata_fields():
