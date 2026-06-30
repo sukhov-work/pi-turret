@@ -1,9 +1,13 @@
 """pi-turret v2 entrypoint — Pi-only run; imports clean on the Mac.
 
 Builds the hardware singletons (PCA9685 servo bus, pump relay, Pi Camera, 1602A
-LCD, status/aux indicators), wires the threaded pipeline, optionally starts the IR
-remote, and registers disarm handlers so any exit converges to the safe state
-(servos centered + relaxed, pump off, status LED off, LCD shows SAFE).
+LCD, status/aux indicators), wires the threaded pipeline, and registers disarm
+handlers so any exit converges to the safe state (servos centered + relaxed, pump
+off, status LED off, LCD shows SAFE).
+
+IR remote control is a SEPARATE process (turret-remote.service /
+app/remote_supervisor.py), not wired here: it owns the IR device and drives this app
+via systemctl + the :8001 web API. The in-process app/remote.py listener is dormant.
 
 Reuses v1's wiring except the rewired aux (BCM26 pump, BCM24 aux laser/marker, BCM23 status LED, I2C bus 1 for
 PCA9685 @ 0x40 + the LCD). All hardware construction is lazy/guarded.
@@ -22,12 +26,11 @@ from actuate.indicators import GpioOutput
 from actuate.lcd import StatusLcd
 from actuate.pca9685 import PCA9685
 from actuate.pump import Pump
-from actuate.servo import Axis, ServoController
+from actuate.servo import ServoController
 from app.control import ControlLoop
 from app.display import LcdReporter
 from app.pipeline import Pipeline
-from app.remote import RemoteActions, RemoteListener
-from app.statemachine import FireState, FireStateMachine
+from app.statemachine import FireStateMachine
 from app.streamer import UsbStreamer
 from app.web import TurretWebController, start_web_thread
 from config import Config, load_config
@@ -96,30 +99,6 @@ def _log_reachable_endpoints(web_port: int, stream_port: int) -> str:
     return primary
 
 
-class TurretRemoteActions(RemoteActions):
-    """Maps IR remote keys to live turret actions (arm/fire/center/jog)."""
-
-    def __init__(self, cfg: Config, servo: ServoController, sm: FireStateMachine,
-                 jog_step_deg: float = 2.0):
-        self._cfg = cfg
-        self._servo = servo
-        self._sm = sm
-        self._step = jog_step_deg
-
-    def toggle_arm(self) -> None:
-        self._sm.reset() if self._sm.state is FireState.SAFE else self._sm.enter_safe()
-
-    def toggle_fire_enabled(self) -> None:
-        self._cfg.fire.enabled = not self._cfg.fire.enabled
-
-    def center(self) -> None:
-        self._servo.center()
-
-    def jog(self, axis: str, direction: int) -> None:
-        ax = Axis.PAN if axis == "pan" else Axis.TILT
-        self._servo.set_angle(ax, self._servo.last_angle(ax) + direction * self._step)
-
-
 def build_pipeline(cfg: Config):
     """Construct hardware + threads. Pi-only (touches I2C / GPIO / camera)."""
     from capture import PiCamCapture
@@ -165,8 +144,6 @@ def build_pipeline(cfg: Config):
                            shots_getter=lambda: pipeline.shots)
     pipeline.reporter = reporter
 
-    remote = RemoteListener(cfg.remote, TurretRemoteActions(cfg, servo, sm))
-
     def disarm() -> None:
         logger.info("disarming -> safe state")
         try:
@@ -180,13 +157,13 @@ def build_pipeline(cfg: Config):
         finally:
             servo.disarm()
 
-    return pipeline, reporter, remote, control, disarm
+    return pipeline, reporter, control, disarm
 
 
 def main() -> None:
     cfg = load_config()
     logging.basicConfig(level=getattr(logging, cfg.app.log_level, logging.INFO))
-    pipeline, reporter, remote, control, disarm = build_pipeline(cfg)
+    pipeline, reporter, control, disarm = build_pipeline(cfg)
 
     def _handle_signal(signum, _frame):
         disarm()
@@ -208,7 +185,6 @@ def main() -> None:
     logger.info("starting pipeline DISARMED (fire.enabled=%s) — press Arm to engage",
                 cfg.fire.enabled)
     pipeline.start()
-    remote.start()
     start_web_thread(TurretWebController(cfg, pipeline, control, streamer=streamer),
                      host="0.0.0.0", port=cfg.app.web_port)
     signal.pause()  # threads are daemons; block the main thread until a signal
