@@ -189,12 +189,13 @@ Pipelined, not serial. One process, threads sharing **lock-protected single-slot
 - ⏳ PARTIAL — detector latency measured (17 ms); the rest of the per-stage budget (capture, servo travel, end-to-end FPS) still needs the Pi (drives whether 1.10 motion-gating is needed for P1).
 - ⏳ OPEN — real water-stream velocity/range → the lead and aim-above constants (Step 1.6, Pi rig).
 - ⏳ OPEN — snapshot volume/retention policy (SD wear) — sample rate vs fire-only.
-- ✅ RESOLVED — IR receiver pin: **BCM17 / GPIO17 / pin 11** (owner-confirmed); decode stack locked to
-  gpio-ir + rc-core + evdev. Remaining IR items are on-Pi (actual scancodes, rc index, held cadence,
-  EVIOCGRAB, `-D/-P` persistence) — see the IR plan §14.
-- ⏳ OPEN (Step 1.15, decide first) — IR control architecture: **in-process evdev listener** vs. a small
-  **always-on supervisor** that start/stops `turret.service` (the manual-start unit) and injects arm/fire/jog.
-  The supervisor model fits the owner's "separate process manages the main turret process" intent.
+- ✅ RESOLVED — IR receiver pin: **BCM25 / GPIO25 / pin 22** (owner-wired 2026-06-30; supersedes the
+  earlier BCM17 proposal). `dtoverlay=gpio-ir,gpio_pin=25`. Decode stack locked to gpio-ir + rc-core + evdev.
+  Remaining IR items are on-Pi (actual scancodes, rc index, held cadence, EVIOCGRAB, `-D/-P` persistence).
+- ✅ RESOLVED (2026-06-30, owner) — IR control architecture: **always-on SUPERVISOR daemon**
+  (`turret-remote.service`, runs `remote_daemon.py`) that owns the IR device, runs `systemctl start/stop`
+  on `turret.service` for the POWER key, and forwards every other key to the running app's web API on :8001.
+  The in-process `app/remote.py` listener stays as a dormant seam. (Built this session.)
 
 ## 8. Build status, wiring, and added steps (updated 2026-06-29)
 
@@ -258,7 +259,7 @@ box has untracked files in the path being checked out (e.g. fixtures the generat
 | 1.12 USB-webcam streamer | **DONE + Pi-VERIFIED 2026-06-29** | `/dev/video0`=UVC cam; streamer launches → HTTP 200 MJPEG → stops; binary = v1's committed ARM `_build/mjpg_streamer` |
 | 1.13 LCD lifecycle display (`actuate/lcd.py`, `app/display.py`) | **DONE (Mac logic)** | verify on real LCD (Pi) |
 | 1.14 status LED + aux marker (`actuate/indicators.py`) | **DONE (Mac)** | verify BCM23 (status) / BCM24 (aux, rewired) on Pi |
-| 1.15 IR remote (`app/remote.py` + `RemoteConfig`) | **PLANNED → buildable** (pin GATE cleared: BCM17/GPIO17/pin11; stack = gpio-ir+rc-core+evdev; bare VS1838B + RC filter, breakout lost) | OS/keytable + listener + MANUAL state + manual fire on Pi; tune jog on rig. **Next phase** — plan: `claude-docs/plans/moniotoring-and-remote/ir-remote-integration-plan.md` |
+| 1.15 IR remote — **SUPERVISOR** (`remote_daemon.py` + `app/remote_supervisor.py` + `turret-remote.service`) | **BUILT on Mac (2026-06-30), on-Pi bring-up pending** — pin BCM25/GPIO25/pin22; gpio-ir+rc-core+evdev; daemon does `systemctl start/stop turret.service` (POWER) + forwards keys to :8001 | Pi: overlay+reboot, `apt install ir-keytable python3-evdev`, capture scancodes, enable units, set `remote.enabled:true`, verify |
 | 1.16 Monitoring (Alloy → Grafana Cloud) + `turret.service` | **DONE + Cloud-VERIFIED 2026-06-29** | Alloy v1.17 ships node/log/turret metrics; manual-start `turret.service`. Ops: `monitoring/README.md` |
 
 **Open flags:** (a) ✅ RESOLVED 2026-06-29 — `decode_v8.coords_normalized` is **pinned `True`** by the
@@ -288,9 +289,9 @@ New hardware is **additive on free pins only.**
 | Water pump (was "main laser") | GPIO **BCM 26** (relay/MOSFET + flyback) | `actuate/pump.py` |
 | Aux laser / aim marker | GPIO **BCM 24** — **rewired from v1's BCM27** (owner, 2026-06-29) | `actuate/indicators.py` |
 | Status LED | GPIO **BCM 23** | `actuate/indicators.py` |
-| IR receiver — **CONFIRMED** (BCM17/GPIO17/**pin 11**) | GPIO **BCM 17** (`dtoverlay=gpio-ir`; bare VS1838B + RC filter, breakout lost; owner-locked pin order SIGNAL·GND·VCC) | `app/remote.py` |
+| IR receiver — **WIRED** (BCM25/GPIO25/**pin 22**, owner 2026-06-30) | GPIO **BCM 25** (`dtoverlay=gpio-ir,gpio_pin=25`; bare VS1838B + RC filter, breakout lost; owner-locked pin order SIGNAL·GND·VCC) | `remote_daemon.py` / `app/remote_supervisor.py` |
 
-Free pins besides BCM17: 4/5/6/12/13/16/18/19/20/21/22/25 + SPI block (**BCM27 freed by the aux rewire**). BCM 2/3 = I2C; **17 (IR)**/23/24 (aux)/26 in use.
+Free pins besides BCM25: 4/5/6/12/13/16/17/18/19/20/21/22 + SPI block (**BCM27 freed by the aux rewire**). BCM 2/3 = I2C; **25 (IR)**/23/24 (aux)/26 in use.
 
 ### Step 1.13 — LCD lifecycle display *(done on Mac; verify on Pi)*
 - **Goal:** surface useful info throughout the run on the 1602A (16×2): boot + LAN IP, then per state —
@@ -307,27 +308,33 @@ Free pins besides BCM17: 4/5/6/12/13/16/18/19/20/21/22/25 + SPI block (**BCM27 f
 - **Files:** `actuate/indicators.py` (`GpioOutput`, `gpiozero.LED` like v1); toggled in `ControlLoop`.
 - **Validation:** unit-tested status-LED-tracks-state + fail-safe; on-Pi confirm BCM23/27 behavior.
 
-### Step 1.15 — IR remote control *(BUILDABLE — NEXT PHASE; full plan is the authority)*
-The complete, buildable plan lives at
-**`claude-docs/plans/moniotoring-and-remote/ir-remote-integration-plan.md`** (hardware, decode stack,
-`RemoteConfig`, `app/remote.py` skeleton, MANUAL state, button map, sub-steps 1.15.0–1.15.7, hard-constraint
-checklist). This section is just the summary; build from that doc.
-- **Goal:** arm/disarm, e-stop, toggle fire-enable, HOME, FIRE, and jog pan/tilt (nudge + hold-to-slew) from
-  the owner's 21-key NEC remote; new MANUAL state suspends auto-aim. Additive (v1 has no GPIO inputs).
+### Step 1.15 — IR remote control *(SUPERVISOR built on Mac 2026-06-30; on-Pi bring-up pending)*
+Architecture authority is now **this section**; the design doc
+**`claude-docs/plans/moniotoring-and-remote/ir-remote-integration-plan.md`** keeps the hardware/decode/scancode
+detail but its *in-process* listener design is superseded by the supervisor (see its top banner).
+- **Goal:** turn the turret **on/off** + arm/disarm, e-stop, toggle fire-enable, HOME, FIRE, and jog pan/tilt
+  from the owner's 21-key NEC remote. Additive (v1 has no GPIO inputs).
+- **Architecture — RESOLVED (supervisor):** an always-on daemon **`turret-remote.service`** (root) runs
+  `remote_daemon.py` → `app/remote_supervisor.py`. It owns the IR evdev device (EVIOCGRAB), and:
+  POWER key (**`0`**) → `systemctl start/stop turret.service`; every other key → HTTP POST to the running app's
+  web API on :8001 (`/api/cmd`, `/api/control-cmd` — the routes the web UI already uses). The daemon never
+  touches servos/pump. Jog forwards to `/api/control-cmd` (works **when disarmed**; MANUAL-while-armed is
+  deferred — it would need in-app control/state changes). The in-process `app/remote.py` listener is a dormant seam.
 - **Stack — LOCKED:** kernel `gpio-ir` overlay + rc-core + `ir-keytable` + python-evdev (daemon-free in-kernel
-  NEC decode; LIRC/pigpio rejected). Remote appears as `/dev/input/eventN` (resolve by driver name, index drifts).
-- **Hardware — GATE CLEARED:** bare **VS1838B on GPIO17 / pin 11** @ 3.3 V (breakout PCB lost → add a
-  replacement RC supply filter: 100 Ω series in VCC + 0.1 µF, +4.7–10 µF bulk). Pin order owner-locked SIGNAL·GND·VCC.
-- **Files:** `app/remote.py` (`RemoteActions` ABC, pure `build_key_map`, `RemoteListener` evdev thread, lazy
-  import), `RemoteConfig` in `config.py`/`config.yaml`, `TurretRemoteActions` in `main.py`, shared command slots
-  in `app/pipeline.py`, MANUAL in `app/statemachine.py`/`app/control.py`. Ships `enabled=False` by default.
-- **First design decision (resolve with owner):** in-process evdev listener (per the plan) vs. a small
-  always-on **supervisor** process that also start/stops `turret.service` — the manual-start service built this
-  session + the owner's "separate process to manage the main turret process" point toward the supervisor model.
-  See the NEXT_SESSION_PROMPT for the framing.
-- **Validation:** `build_key_map` unit-tested on Mac; on-Pi a key-down dispatches its intent without the listener
-  ever touching servos/pump (control thread stays the single mover); manual jog within clamps; fire stays
-  non-blocking + honors fire-enable/cooldown; remote faults are best-effort (never crash control).
+  NEC decode). Remote appears as `/dev/input/eventN` (resolve by driver name `gpio_ir_recv`, index drifts).
+- **Hardware — WIRED:** bare **VS1838B on BCM25 / GPIO25 / pin 22** @ 3.3 V (`dtoverlay=gpio-ir,gpio_pin=25`).
+  Breakout PCB lost → add the replacement RC supply filter (100 Ω series in VCC + 0.1 µF, +4.7–10 µF bulk).
+  Pin order owner-locked SIGNAL·GND·VCC.
+- **Files (built):** `app/remote_supervisor.py` (pure `build_intent_map` + `http_plan`, `IntentForwarder`,
+  `RemoteSupervisor` evdev loop, lazy import), `remote_daemon.py` (entrypoint), `RemoteConfig` extended in
+  `config.py`, units `monitoring/systemd/{turret-remote,pi-turret-ir}.service` + `monitoring/ir-load-keytable.sh`
+  + `monitoring/rc_keymaps/pi_turret.toml`, dashboard Services row, `deploy.sh`. Tests:
+  `tests/test_remote_supervisor.py` (28). Ships `remote.enabled=False`.
+- **On-Pi bring-up (pending):** overlay + reboot; `apt install ir-keytable python3-evdev`; capture this remote's
+  real NEC scancodes; load keytable; set `remote.enabled: true`; verify POWER start/stop + forwards + Alloy liveness.
+- **Validation:** `build_intent_map`/`http_plan`/dispatch unit-tested on Mac; on-Pi a key-down dispatches its
+  intent without the daemon ever touching servos/pump; fire stays non-blocking + honors fire-enable/cooldown;
+  remote faults are best-effort (never crash control).
 
 ## 9. Detector Build Track — ✅ **COMPLETE (2026-06-29)**
 

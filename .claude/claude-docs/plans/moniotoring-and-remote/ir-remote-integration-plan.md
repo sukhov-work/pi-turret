@@ -1,5 +1,17 @@
 # pi-turret v2 — Step 1.15 IR Remote Control — Implementation Plan (agent handoff)
 
+> ## ⚠️ SUPERSEDED IN TWO PLACES (2026-06-30) — read this first
+> 1. **Pin: BCM25 / GPIO25 / pin 22**, not BCM17/pin11. The owner wired the VS1838B signal to **BCM25**;
+>    use `dtoverlay=gpio-ir,gpio_pin=25`. All "GPIO17 / pin 11" references below are stale — read them as BCM25.
+> 2. **Architecture: a separate always-on SUPERVISOR daemon**, not the in-process `app/remote.py` listener.
+>    Built as `turret-remote.service` (root) → `remote_daemon.py` → `app/remote_supervisor.py`: it owns the IR
+>    device, the POWER key (`0`) runs `systemctl start/stop turret.service`, and every other key is forwarded as
+>    an HTTP POST to the running app's web API on :8001 (`/api/cmd`, `/api/control-cmd`). The decode stack,
+>    scancode-capture procedure, keytable, `RemoteConfig` fields, button map, and hard-constraint checklist below
+>    are all still correct and reused. The §6–§9 *in-process* code (RemoteActions thread, shared slots, MANUAL
+>    state in control.py) is **deferred** — jog currently forwards to `/api/control-cmd` (disarmed only).
+>    Authority for the as-built design is now `IMPLEMENTATION_PLAN.md` Step 1.15. See `DECISIONS.md` 2026-06-30.
+
 > **Placement:** `.claude/claude-docs/plans/moniotoring-and-remote/ir-remote-integration-plan.md` (alongside the original `migrate-to-allow.md` draft).
 > **Status:** ready to build. Expands `IMPLEMENTATION_PLAN.md` **Step 1.15** from *SEAM ONLY* to a full buildable step. Phase-1 stretch feature (process control = must-have; manual steering = stretch).
 > **Source-of-truth split:** this doc = *what to build*. `pi-turret-v1-asbuilt.md` = *what exists* (wiring/GPIO, §3/§13). The research report *"Integrating a 21-Key NEC IR Remote on Raspberry Pi 4 / Bullseye"* = *why* (full decode-stack comparison, exhaustive scancode table, NEC timing derivations) — this plan carries only the buildable essentials and points there for rationale.

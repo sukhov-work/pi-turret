@@ -1,0 +1,42 @@
+# Deployed to /etc/systemd/system/turret-remote.service
+#
+# pi-turret IR remote SUPERVISOR — an always-on daemon that MANAGES the main turret app.
+# It owns the IR receiver (evdev / EVIOCGRAB) and:
+#   - the POWER key  -> `systemctl start|stop turret.service`  (turn the turret on/off)
+#   - every other key -> forwarded to the RUNNING app's web API on :8001
+#                        (/api/cmd, /api/control-cmd — what the web UI already calls)
+# It NEVER drives servos/pump directly; the app's control thread stays the single mover.
+#
+# WHY a separate unit (not an in-process thread): only one process can EVIOCGRAB the IR
+# device, and only an always-on process can start the app while it is STOPPED.
+#
+# Runs as root so it can BOTH read /dev/input/eventN AND start/stop turret.service.
+# Least-privilege alternative: User=jayson (already in the 'input' group) + a polkit rule
+# permitting start/stop of turret.service. Root is used here for simplicity on the appliance.
+#
+# Feature-gated: remote_daemon.py exits 0 when remote.enabled is False (config). Set
+# `remote.enabled: true` in /home/jayson/pi-turret/config.local.yaml to activate.
+#
+# Liveness: node_exporter's systemd collector (config.alloy unit_include "(turret.*|alloy)")
+# already matches this unit -> node_systemd_unit_state{name="turret-remote.service",state="active"}.
+# Enabled on boot (unlike turret.service) — this supervisor is what makes the turret remotely
+# power-controllable, so it must come up automatically.
+
+[Unit]
+Description=pi-turret IR remote supervisor (manages turret.service)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/home/jayson/pi-turret
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 /home/jayson/pi-turret/remote_daemon.py
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=10
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=multi-user.target

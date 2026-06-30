@@ -168,22 +168,50 @@ class AppConfig:
 
 @dataclass
 class RemoteConfig:
-    """IR remote control (PROPOSED — additive hardware, see IMPLEMENTATION_PLAN 1.15).
+    """IR remote control (Step 1.15 — additive hardware on a FREE pin).
 
-    v1 has no GPIO inputs, so the IR receiver is a NEW wire on a FREE pin plus a
-    ``dtoverlay=gpio-ir`` in /boot/config.txt. ``gpio_bcm`` is a proposal — confirm
-    before wiring. With rc-core/evdev the key names come from ``ir-keytable``.
+    Receiver: bare VS1838B on **BCM25 / gpio_pin=25** (owner-wired) via
+    ``dtoverlay=gpio-ir,gpio_pin=25`` in /boot/config.txt → rc-core exposes the remote
+    as ``/dev/input/eventN``; ``ir-keytable`` decodes NEC scancodes to the ``KEY_*``
+    names below.
+
+    Two consumers share this section:
+      * the **supervisor daemon** (``remote_daemon.py`` / ``app/remote_supervisor.py``,
+        a separate always-on ``turret-remote.service``) — owns the IR device, runs
+        ``systemctl start/stop`` on the turret unit for POWER, and forwards every other
+        key to the running app's web API on :8001. This is the active path.
+      * the dormant **in-process** ``RemoteListener`` (``app/remote.py``) — kept as a
+        seam; reuses ``key_*`` + ``build_key_map``. No-op while ``enabled`` is False.
+
+    Ships ``enabled=False`` (safe default); set ``remote.enabled: true`` in the Pi's
+    ``config.local.yaml`` to activate the supervisor. ``KEY_*`` defaults follow the
+    21-key NEC remote button map — VERIFY scancodes per unit with ``ir-keytable -t``.
     """
     enabled: bool = False
-    gpio_bcm: int = 17                       # PROPOSED free pin (confirm before wiring)
-    input_device: str = ""                   # evdev path, e.g. /dev/input/eventN
-    key_toggle_arm: str = "KEY_POWER"
-    key_enable_fire: str = "KEY_OK"
-    key_center: str = "KEY_HOME"
-    key_pan_left: str = "KEY_LEFT"
-    key_pan_right: str = "KEY_RIGHT"
-    key_tilt_up: str = "KEY_UP"
-    key_tilt_down: str = "KEY_DOWN"
+    gpio_bcm: int = 25                       # owner-wired signal pin (dtoverlay gpio_pin=25)
+    # --- IR device resolution (supervisor) ---
+    device_name: str = "gpio_ir_recv"        # match evdev device by NAME (eventN index drifts)
+    input_device: str = ""                   # optional explicit /dev/input/by-path/... (overrides name)
+    grab: bool = True                        # EVIOCGRAB so digits don't leak to a tty (headless)
+    oneshot_ignore_autorepeat: bool = True   # one-shots fire on key-down only; jog uses autorepeat
+    # --- key -> action map (KEY_* evdev names; verify per unit) ---
+    key_estop: str = "KEY_STOP"              # CH-  -> ESTOP (pump off + disarm)
+    key_toggle_arm: str = "KEY_CHANNELUP"    # CH+  -> arm/disarm toggle
+    key_enable_fire: str = "KEY_MODE"        # EQ   -> toggle fire-enable
+    key_center: str = "KEY_HOMEPAGE"         # CH   -> HOME / center
+    key_fire: str = "KEY_PLAYPAUSE"          # >||  -> manual FIRE
+    key_power: str = "KEY_NUMERIC_0"         # 0    -> POWER toggle: systemctl start/stop turret.service
+    key_pan_left: str = "KEY_PREVIOUS"       # |<<  -> jog pan -
+    key_pan_right: str = "KEY_NEXT"          # >>|  -> jog pan +
+    key_tilt_up: str = "KEY_VOLUMEUP"        # +    -> jog tilt up
+    key_tilt_down: str = "KEY_VOLUMEDOWN"    # -    -> jog tilt down
+    # --- supervisor forwarding + process control ---
+    forward_host: str = "127.0.0.1"          # the running app's web API host
+    forward_port: int = 8001                 # app.web_port — where intents are POSTed
+    forward_timeout_s: float = 1.0           # per-request HTTP timeout (best-effort)
+    turret_unit: str = "turret.service"      # systemd unit the POWER key starts/stops
+    repeat_delay_ms: int = 150               # ir-keytable -D (fast slew onset for hold-to-jog)
+    repeat_period_ms: int = 110              # ir-keytable -P (near the ~108 ms NEC repeat floor)
 
 
 @dataclass

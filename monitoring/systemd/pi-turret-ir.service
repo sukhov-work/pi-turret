@@ -1,0 +1,21 @@
+# Deployed to /etc/systemd/system/pi-turret-ir.service
+#
+# Loads the pi-turret NEC keytable at boot so the IR remote's scancodes decode to the
+# KEY_* events the supervisor expects. Requires `dtoverlay=gpio-ir,gpio_pin=25` in
+# /boot/config.txt (Bullseye) + a reboot so the gpio_ir_recv rc device exists.
+#
+# Uses the repo's name-resolver wrapper (the rcN index is not stable). -D/-P lower the
+# autorepeat delay/period for responsive hold-to-slew jog; some drivers don't persist
+# them across boot, so they are re-applied here every boot.
+
+[Unit]
+Description=Load pi-turret IR keytable (NEC, gpio-ir)
+After=multi-user.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/home/jayson/pi-turret/monitoring/ir-load-keytable.sh /etc/rc_keymaps/pi_turret.toml
+
+[Install]
+WantedBy=multi-user.target

@@ -185,6 +185,25 @@ def build_pi_health():
                   thresholds=[{'color': 'green', 'value': None}, {'color': 'yellow', 'value': 70},
                               {'color': 'red', 'value': 90}]))
     y += 4
+    p.append(row('Services', y)); y += 1
+    svc_up = [{'type': 'value', 'options': {'0': {'text': 'DOWN', 'color': 'red'},
+                                            '1': {'text': 'UP', 'color': 'green'}}}]
+    svc_th = [{'color': 'red', 'value': None}, {'color': 'green', 'value': 1}]
+    p.append(stat('turret.service (main app)',
+                  i('node_systemd_unit_state', 'name="turret.service",state="active"'),
+                  gridpos(0, y, 6, 4), mappings=svc_up, color_mode='background', thresholds=svc_th))
+    p.append(stat('turret-remote.service (IR supervisor)',
+                  i('node_systemd_unit_state', 'name="turret-remote.service",state="active"'),
+                  gridpos(6, y, 6, 4), mappings=svc_up, color_mode='background', thresholds=svc_th))
+    p.append(stat('alloy.service (monitoring)',
+                  i('node_systemd_unit_state', 'name="alloy.service",state="active"'),
+                  gridpos(12, y, 6, 4), mappings=svc_up, color_mode='background', thresholds=svc_th))
+    p.append(stat('IR supervisor restarts (1h)',
+                  'changes(%s[1h])' % i('node_systemd_unit_start_time_seconds', 'name="turret-remote.service"'),
+                  gridpos(18, y, 6, 4), color_mode='background',
+                  thresholds=[{'color': 'green', 'value': None}, {'color': 'yellow', 'value': 1},
+                              {'color': 'red', 'value': 3}]))
+    y += 4
     p.append(row('CPU & Load', y)); y += 1
     p.append(timeseries('CPU busy % per core',
                         ['100 - (avg by (cpu)(rate(%s[$__rate_interval])) * 100)' % i('node_cpu_seconds_total', 'mode="idle"')],

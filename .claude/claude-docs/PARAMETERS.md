@@ -216,19 +216,32 @@ detection compute** on rendering. Independent of detection.
 | `input_plugin` / `output_plugin` | `input_uvc.so` / `output_http.so` | UVC grab (low CPU) / HTTP serve. Rarely changed. |
 | `www_dir` | `""` | Optional web root for mjpg-streamer's own pages (`""` = stream only). |
 
-## remote — IR remote control (PROPOSED seam — additive hardware)
-v1 has no GPIO inputs; needs an IR receiver wired + a `dtoverlay`. Off until fitted.
+## remote — IR remote control (Step 1.15 — supervisor daemon, additive hardware)
+Bare VS1838B on **BCM25** (`dtoverlay=gpio-ir,gpio_pin=25`). The **supervisor** (`turret-remote.service` →
+`remote_daemon.py`) owns the IR device and either runs `systemctl` on the turret unit (POWER key) or forwards
+the key to the running app's :8001 API. Ships off — set `remote.enabled: true` in `config.local.yaml` to activate.
+`KEY_*` names must match `/etc/rc_keymaps/pi_turret.toml`; **verify the NEC scancodes per unit** with `ir-keytable -t`.
 
 | Param | Default | Description |
 |---|---|---|
-| `enabled` | `false` | Whether the IR listener runs. |
-| `gpio_bcm` | `17` | `[restart]` Proposed free pin for the IR receiver. Needs `/boot/config.txt dtoverlay=gpio-ir`. Confirm before wiring. |
-| `input_device` | `""` | evdev path (`/dev/input/eventN`) the receiver appears as (from `ir-keytable`). |
-| `key_toggle_arm` | `KEY_POWER` | IR key that arms/disarms. |
-| `key_enable_fire` | `KEY_OK` | IR key that toggles **auto**-fire. |
-| `key_center` | `KEY_HOME` | IR key that centers to home. |
-| `key_pan_left` / `key_pan_right` | `KEY_LEFT` / `KEY_RIGHT` | IR keys that jog pan. |
-| `key_tilt_up` / `key_tilt_down` | `KEY_UP` / `KEY_DOWN` | IR keys that jog tilt. |
+| `enabled` | `false` | Master switch. When false the daemon logs + exits 0 (inactive). |
+| `gpio_bcm` | `25` | `[restart]` IR receiver signal pin (owner-wired). Sets `dtoverlay=gpio-ir,gpio_pin=25`. |
+| `device_name` | `gpio_ir_recv` | evdev device matched by **name** (the `/dev/input/eventN` index drifts across boots). |
+| `input_device` | `""` | Optional explicit evdev path; overrides `device_name` when set. |
+| `grab` | `true` | `EVIOCGRAB` the device so digit keys don't leak to a tty (headless). |
+| `oneshot_ignore_autorepeat` | `true` | One-shots (arm/fire/estop/home/power) act on key-down only; jog uses autorepeat. |
+| `key_estop` | `KEY_STOP` | CH− → ESTOP (pump off + disarm). |
+| `key_toggle_arm` | `KEY_CHANNELUP` | CH+ → arm/disarm toggle (reads `/api/turret-state`). |
+| `key_enable_fire` | `KEY_MODE` | EQ → toggle fire-enable. |
+| `key_center` | `KEY_HOMEPAGE` | CH → HOME / center. |
+| `key_fire` | `KEY_PLAYPAUSE` | ⏯ → manual FIRE. |
+| `key_power` | `KEY_NUMERIC_0` | `0` → POWER: `systemctl start/stop` the turret unit (manage the main app). |
+| `key_pan_left` / `key_pan_right` | `KEY_PREVIOUS` / `KEY_NEXT` | jog pan − / + (forwarded to `/api/control-cmd`, disarmed only). |
+| `key_tilt_up` / `key_tilt_down` | `KEY_VOLUMEUP` / `KEY_VOLUMEDOWN` | jog tilt up / down. |
+| `forward_host` / `forward_port` | `127.0.0.1` / `8001` | The running app's web API the daemon POSTs intents to. |
+| `forward_timeout_s` | `1.0` | Per-request HTTP timeout (best-effort; a down app just logs). |
+| `turret_unit` | `turret.service` | systemd unit the POWER key starts/stops. |
+| `repeat_delay_ms` / `repeat_period_ms` | `150` / `110` | `ir-keytable -D/-P` autorepeat tuning for hold-to-slew jog (set in `pi-turret-ir.service`). |
 
 ---
 

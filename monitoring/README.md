@@ -37,11 +37,17 @@ The turret app runs as a **manual-start systemd service** so its liveness is mon
 | `/etc/default/alloy` | `monitoring/default-alloy` | pins HTTP to :12345, WAL to `/var/lib/alloy/data` |
 | `/etc/systemd/system/alloy.service.d/override.conf` | `monitoring/systemd/alloy-override.conf` | loads secrets.env |
 | `/etc/systemd/system/turret.service` | `monitoring/systemd/turret.service` | **manual-start, not enabled** |
+| `/etc/systemd/system/turret-remote.service` | `monitoring/systemd/turret-remote.service` | IR supervisor (root) — **enabled on boot** |
+| `/etc/systemd/system/pi-turret-ir.service` | `monitoring/systemd/pi-turret-ir.service` | IR keytable loader (oneshot) |
+| `/etc/rc_keymaps/pi_turret.toml` | `monitoring/rc_keymaps/pi_turret.toml` | NEC scancode → KEY_* map |
+| — | `monitoring/ir-load-keytable.sh` | resolves rc device by name + loads keytable |
 | — | `monitoring/dashboards/*.json` (+ generator) | import into Grafana |
 | — | `monitoring/deploy.sh` | re-deploy config to /etc |
 
 **Service state:** `alloy` = enabled + running (monitoring persists across reboot).
-`turret.service` = installed, **disabled, stopped** (start it yourself; see §5).
+`turret.service` = installed, **disabled, stopped** (start it yourself, or via the IR power key; see §5).
+`turret-remote.service` = IR supervisor that owns the receiver and `systemctl start/stop`s turret.service for the
+power key (forwards other keys to the app's :8001 API); **enabled on boot**, self-exits when `remote.enabled=False`.
 
 ## 3. Grafana Cloud connection (stack `mellowmushroom1792`, org 1804779, region prod-us-west-0)
 
@@ -139,5 +145,6 @@ turret log, or add a node_exporter keep-list.
 - Alerts: turret/alloy down (`node_systemd_unit_state == 0`), CPU temp > 80 °C, disk > 90 %, no-data on `up`.
 - Per-process CPU/mem via `prometheus.exporter.process` (match `main.py`) once you want resource trends.
 - `vcgencmd get_throttled` undervoltage/throttle bits via a node_exporter textfile-collector script.
-- When the IR-remote supervisor lands, add its unit to the systemd collector `unit_include` and a
-  liveness panel; consider an SA token to provision dashboards/alerts as code.
+- ✅ IR-remote supervisor (`turret-remote.service`) landed 2026-06-30 — already matched by the systemd
+  collector `unit_include="(turret.*|alloy)\.service"` (no Alloy change) + a Services liveness row in
+  `pi-health.json`. Consider an SA token to provision dashboards/alerts as code.
