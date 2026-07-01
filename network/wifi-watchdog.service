@@ -1,0 +1,7 @@
+[Unit]
+Description=WiFi connectivity watchdog (escape to known-good SSID if no internet)
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/wifi-watchdog.sh

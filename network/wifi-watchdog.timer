@@ -1,0 +1,11 @@
+[Unit]
+Description=Run wifi-watchdog periodically
+
+[Timer]
+OnBootSec=45
+OnUnitActiveSec=60
+AccuracySec=10s
+Unit=wifi-watchdog.service
+
+[Install]
+WantedBy=timers.target
